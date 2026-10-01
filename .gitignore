@@ -1,5 +1,5 @@
 # Binaries
-specter
+/specter
 *.exe
 *.exe~
 *.dll
