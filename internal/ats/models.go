@@ -7,15 +7,26 @@ import (
 
 // JobPosting represents an active open technical role discovered on an ATS.
 type JobPosting struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	URL         string    `json:"url"`
-	Location    string    `json:"location"`
-	Department  string    `json:"department"`
-	Seniority   string    `json:"seniority"`
-	Description string    `json:"description,omitempty"`
-	Keywords    []string  `json:"keywords"`
-	PostedAt    time.Time `json:"posted_at"`
+	ID                 string    `json:"id"`
+	Title              string    `json:"title"`
+	URL                string    `json:"url"`
+	ApplyURL           string    `json:"apply_url,omitempty"`
+	Location           string    `json:"location"`
+	Department         string    `json:"department"`
+	Seniority          string    `json:"seniority"`
+	Description        string    `json:"description,omitempty"`
+	Keywords           []string  `json:"keywords"`
+	PostedAt           time.Time `json:"posted_at"`
+	WorkplaceType      string    `json:"workplace_type,omitempty"`
+	RemotePolicy       string    `json:"remote_policy,omitempty"`
+	GlobalRemote       bool      `json:"global_remote"`
+	ContractorFriendly bool      `json:"contractor_friendly"`
+	Compensation       string    `json:"compensation,omitempty"`
+	CompanyDomain      string    `json:"company_domain,omitempty"`
+	CompanyName        string    `json:"company_name,omitempty"`
+	FirstSeenAt        time.Time `json:"first_seen_at"`
+	LastSeenAt         time.Time `json:"last_seen_at"`
+	IsNew              bool      `json:"is_new"`
 }
 
 // CompanyMeta represents discovered company metadata, engineering signals, and active roles.
