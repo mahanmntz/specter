@@ -126,13 +126,21 @@ func (g *GenericAdapter) Extract(ctx context.Context, target string) (*CompanyMe
 				signalSet[m] = true
 			}
 
+			policy := signals.ClassifyRemotePolicy("Remote", l, l)
+
 			meta.OpenRoles = append(meta.OpenRoles, JobPosting{
-				ID:        fmt.Sprintf("gen-%d", time.Now().UnixNano()),
-				Title:     extractTitleFromURL(l),
-				URL:       l,
-				Seniority: signals.ExtractSeniority(l),
-				Keywords:  matched,
-				PostedAt:  time.Now().UTC(),
+				ID:                 fmt.Sprintf("gen-%d", time.Now().UnixNano()),
+				Title:              extractTitleFromURL(l),
+				URL:                l,
+				ApplyURL:           policy.DirectApplyURL,
+				Location:           "Remote",
+				Seniority:          signals.ExtractSeniority(l),
+				Keywords:           matched,
+				PostedAt:           time.Now().UTC(),
+				WorkplaceType:      policy.PolicyName,
+				RemotePolicy:       policy.Badge,
+				GlobalRemote:       policy.IsGlobalRemote,
+				ContractorFriendly: policy.IsContractorFriendly,
 			})
 		}
 	}
