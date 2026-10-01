@@ -52,13 +52,37 @@ func NewStore(dbPath string) (*Store, error) {
 		external_id TEXT UNIQUE NOT NULL,
 		title TEXT NOT NULL,
 		url TEXT NOT NULL,
+		apply_url TEXT DEFAULT '',
 		location TEXT,
 		department TEXT,
 		seniority TEXT,
 		keywords TEXT,
+		workplace_type TEXT DEFAULT '',
+		remote_policy TEXT DEFAULT '',
+		global_remote BOOLEAN DEFAULT 0,
+		contractor_friendly BOOLEAN DEFAULT 0,
+		compensation TEXT DEFAULT '',
 		discovered_at DATETIME NOT NULL,
+		first_seen_at DATETIME,
+		last_seen_at DATETIME,
+		is_active BOOLEAN DEFAULT 1,
 		FOREIGN KEY(company_id) REFERENCES companies(id) ON DELETE CASCADE
 	);
+
+	CREATE TABLE IF NOT EXISTS crawl_runs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		run_id TEXT UNIQUE NOT NULL,
+		started_at DATETIME NOT NULL,
+		completed_at DATETIME,
+		total_companies INTEGER DEFAULT 0,
+		total_roles INTEGER DEFAULT 0,
+		new_roles INTEGER DEFAULT 0,
+		total_leads INTEGER DEFAULT 0,
+		new_leads INTEGER DEFAULT 0,
+		report_dir TEXT DEFAULT ''
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_crawl_runs_time ON crawl_runs(started_at);
 
 	CREATE TABLE IF NOT EXISTS leads (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +168,21 @@ func NewStore(dbPath string) (*Store, error) {
 		_, _ = db.Exec("ALTER TABLE engineering_leads ADD COLUMN " + col)
 	}
 
+	roleCols := []string{
+		"apply_url TEXT DEFAULT ''",
+		"workplace_type TEXT DEFAULT ''",
+		"remote_policy TEXT DEFAULT ''",
+		"global_remote BOOLEAN DEFAULT 0",
+		"contractor_friendly BOOLEAN DEFAULT 0",
+		"compensation TEXT DEFAULT ''",
+		"first_seen_at DATETIME",
+		"last_seen_at DATETIME",
+		"is_active BOOLEAN DEFAULT 1",
+	}
+	for _, col := range roleCols {
+		_, _ = db.Exec("ALTER TABLE roles ADD COLUMN " + col)
+	}
+
 	// Purge any historical bot / CI accounts in persistent store
 	_, _ = db.Exec(`DELETE FROM engineering_leads WHERE
 		name LIKE '%[bot]%' OR github_handle LIKE '%[bot]%' OR github_handle LIKE '%bot%' OR github_handle LIKE 'bot-%' OR github_handle LIKE 'bot_%' OR
@@ -223,17 +262,47 @@ func (s *Store) SaveCompanyAndRoles(ctx context.Context, meta *ats.CompanyMeta) 
 	}
 
 	newRolesCount := 0
-	for _, r := range meta.OpenRoles {
+	for i := range meta.OpenRoles {
+		r := &meta.OpenRoles[i]
 		kwStr := strings.Join(r.Keywords, ",")
-		rRes, err := s.db.ExecContext(ctx, `
-			INSERT OR IGNORE INTO roles (company_id, external_id, title, url, location, department, seniority, keywords, discovered_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, companyID, r.ID, r.Title, r.URL, r.Location, r.Department, r.Seniority, kwStr, now)
-		if err == nil {
-			rowsAffected, _ := rRes.RowsAffected()
-			if rowsAffected > 0 {
+		applyURL := r.ApplyURL
+		if applyURL == "" {
+			applyURL = r.URL
+		}
+
+		var existingID int64
+		checkErr := s.db.QueryRowContext(ctx, "SELECT id FROM roles WHERE external_id = ?", r.ID).Scan(&existingID)
+		if checkErr == sql.ErrNoRows {
+			// New role!
+			_, insErr := s.db.ExecContext(ctx, `
+				INSERT INTO roles (
+					company_id, external_id, title, url, apply_url, location, department, seniority,
+					keywords, workplace_type, remote_policy, global_remote, contractor_friendly,
+					compensation, discovered_at, first_seen_at, last_seen_at, is_active
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+			`, companyID, r.ID, r.Title, r.URL, applyURL, r.Location, r.Department, r.Seniority,
+				kwStr, r.WorkplaceType, r.RemotePolicy, r.GlobalRemote, r.ContractorFriendly,
+				r.Compensation, now, now, now)
+			if insErr == nil {
 				newRolesCount++
+				r.IsNew = true
+				r.FirstSeenAt = now
+				r.LastSeenAt = now
 			}
+		} else if checkErr == nil {
+			// Existing role: update last_seen_at and active status
+			_, _ = s.db.ExecContext(ctx, `
+				UPDATE roles SET
+					title = ?, url = ?, apply_url = ?, location = ?, department = ?,
+					seniority = ?, keywords = ?, workplace_type = ?, remote_policy = ?,
+					global_remote = ?, contractor_friendly = ?, compensation = ?,
+					last_seen_at = ?, is_active = 1
+				WHERE id = ?
+			`, r.Title, r.URL, applyURL, r.Location, r.Department,
+				r.Seniority, kwStr, r.WorkplaceType, r.RemotePolicy,
+				r.GlobalRemote, r.ContractorFriendly, r.Compensation, now, existingID)
+			r.IsNew = false
+			r.LastSeenAt = now
 		}
 	}
 
@@ -491,7 +560,13 @@ func (s *Store) ListCompanies(ctx context.Context) ([]ats.CompanyMeta, error) {
 // ListRolesForCompany retrieves open backend positions for a specific company domain.
 func (s *Store) ListRolesForCompany(ctx context.Context, domain string) ([]ats.JobPosting, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT r.id, r.external_id, r.title, r.url, r.location, r.department, r.seniority, r.keywords, r.discovered_at
+		SELECT c.domain, c.name, r.id, r.external_id, r.title, r.url, COALESCE(r.apply_url, ''),
+		       COALESCE(r.location, ''), COALESCE(r.department, ''), COALESCE(r.seniority, ''),
+		       COALESCE(r.keywords, ''), r.discovered_at,
+		       COALESCE(r.workplace_type, ''), COALESCE(r.remote_policy, ''),
+		       COALESCE(r.global_remote, 0), COALESCE(r.contractor_friendly, 0),
+		       COALESCE(r.compensation, ''), COALESCE(r.first_seen_at, r.discovered_at),
+		       COALESCE(r.last_seen_at, r.discovered_at)
 		FROM roles r
 		JOIN companies c ON r.company_id = c.id
 		WHERE c.domain = ? OR c.domain LIKE ?
@@ -507,8 +582,24 @@ func (s *Store) ListRolesForCompany(ctx context.Context, domain string) ([]ats.J
 		var r ats.JobPosting
 		var internalID int64
 		var kwCSV string
-		if err := rows.Scan(&internalID, &r.ID, &r.Title, &r.URL, &r.Location, &r.Department, &r.Seniority, &kwCSV, &r.PostedAt); err != nil {
+		var globalRem, contractorFr bool
+		var postedAtRaw, firstSeenRaw, lastSeenRaw any
+		if err := rows.Scan(
+			&r.CompanyDomain, &r.CompanyName,
+			&internalID, &r.ID, &r.Title, &r.URL, &r.ApplyURL,
+			&r.Location, &r.Department, &r.Seniority, &kwCSV, &postedAtRaw,
+			&r.WorkplaceType, &r.RemotePolicy, &globalRem, &contractorFr,
+			&r.Compensation, &firstSeenRaw, &lastSeenRaw,
+		); err != nil {
 			return nil, err
+		}
+		r.PostedAt = parseSQLiteTime(postedAtRaw)
+		r.GlobalRemote = globalRem
+		r.ContractorFriendly = contractorFr
+		r.FirstSeenAt = parseSQLiteTime(firstSeenRaw)
+		r.LastSeenAt = parseSQLiteTime(lastSeenRaw)
+		if r.ApplyURL == "" {
+			r.ApplyURL = r.URL
 		}
 		if kwCSV != "" {
 			r.Keywords = strings.Split(kwCSV, ",")
@@ -521,14 +612,24 @@ func (s *Store) ListRolesForCompany(ctx context.Context, domain string) ([]ats.J
 
 // ListRoles retrieves open roles matching an optional keyword.
 func (s *Store) ListRoles(ctx context.Context, keyword string) ([]ats.JobPosting, error) {
-	query := `SELECT id, external_id, title, url, location, department, seniority, keywords, discovered_at FROM roles`
+	query := `
+		SELECT c.domain, c.name, r.id, r.external_id, r.title, r.url, COALESCE(r.apply_url, ''),
+		       COALESCE(r.location, ''), COALESCE(r.department, ''), COALESCE(r.seniority, ''),
+		       COALESCE(r.keywords, ''), r.discovered_at,
+		       COALESCE(r.workplace_type, ''), COALESCE(r.remote_policy, ''),
+		       COALESCE(r.global_remote, 0), COALESCE(r.contractor_friendly, 0),
+		       COALESCE(r.compensation, ''), COALESCE(r.first_seen_at, r.discovered_at),
+		       COALESCE(r.last_seen_at, r.discovered_at)
+		FROM roles r
+		JOIN companies c ON r.company_id = c.id
+	`
 	var args []any
 	if keyword != "" {
-		query += ` WHERE title LIKE ? OR keywords LIKE ?`
+		query += ` WHERE r.title LIKE ? OR r.keywords LIKE ?`
 		pattern := "%" + keyword + "%"
 		args = append(args, pattern, pattern)
 	}
-	query += ` ORDER BY discovered_at DESC`
+	query += ` ORDER BY r.discovered_at DESC`
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -541,8 +642,24 @@ func (s *Store) ListRoles(ctx context.Context, keyword string) ([]ats.JobPosting
 		var r ats.JobPosting
 		var internalID int64
 		var kwCSV string
-		if err := rows.Scan(&internalID, &r.ID, &r.Title, &r.URL, &r.Location, &r.Department, &r.Seniority, &kwCSV, &r.PostedAt); err != nil {
+		var globalRem, contractorFr bool
+		var postedAtRaw, firstSeenRaw, lastSeenRaw any
+		if err := rows.Scan(
+			&r.CompanyDomain, &r.CompanyName,
+			&internalID, &r.ID, &r.Title, &r.URL, &r.ApplyURL,
+			&r.Location, &r.Department, &r.Seniority, &kwCSV, &postedAtRaw,
+			&r.WorkplaceType, &r.RemotePolicy, &globalRem, &contractorFr,
+			&r.Compensation, &firstSeenRaw, &lastSeenRaw,
+		); err != nil {
 			return nil, err
+		}
+		r.PostedAt = parseSQLiteTime(postedAtRaw)
+		r.GlobalRemote = globalRem
+		r.ContractorFriendly = contractorFr
+		r.FirstSeenAt = parseSQLiteTime(firstSeenRaw)
+		r.LastSeenAt = parseSQLiteTime(lastSeenRaw)
+		if r.ApplyURL == "" {
+			r.ApplyURL = r.URL
 		}
 		if kwCSV != "" {
 			r.Keywords = strings.Split(kwCSV, ",")
@@ -552,3 +669,184 @@ func (s *Store) ListRoles(ctx context.Context, keyword string) ([]ats.JobPosting
 
 	return roles, nil
 }
+
+// DirectApplyFilter options for filtering remote and contractor-friendly roles.
+type DirectApplyFilter struct {
+	CompanyDomain  string
+	GlobalOnly     bool
+	ContractorOnly bool
+	FreshOnly      bool
+	Since          time.Time
+}
+
+// ListDirectApplyRoles queries roles optimized for direct application and global reachability.
+func (s *Store) ListDirectApplyRoles(ctx context.Context, filter DirectApplyFilter) ([]ats.JobPosting, error) {
+	query := `
+		SELECT c.domain, c.name, r.id, r.external_id, r.title, r.url, COALESCE(r.apply_url, ''),
+		       COALESCE(r.location, ''), COALESCE(r.department, ''), COALESCE(r.seniority, ''),
+		       COALESCE(r.keywords, ''), r.discovered_at,
+		       COALESCE(r.workplace_type, ''), COALESCE(r.remote_policy, ''),
+		       COALESCE(r.global_remote, 0), COALESCE(r.contractor_friendly, 0),
+		       COALESCE(r.compensation, ''), COALESCE(r.first_seen_at, r.discovered_at),
+		       COALESCE(r.last_seen_at, r.discovered_at)
+		FROM roles r
+		JOIN companies c ON r.company_id = c.id
+		WHERE r.is_active = 1
+	`
+	var args []any
+	if filter.CompanyDomain != "" {
+		query += ` AND (c.domain = ? OR c.domain LIKE ?)`
+		args = append(args, filter.CompanyDomain, "%"+filter.CompanyDomain+"%")
+	}
+	if filter.GlobalOnly {
+		query += ` AND r.global_remote = 1`
+	}
+	if filter.ContractorOnly {
+		query += ` AND r.contractor_friendly = 1`
+	}
+	if filter.FreshOnly && !filter.Since.IsZero() {
+		query += ` AND r.first_seen_at >= ?`
+		args = append(args, filter.Since)
+	}
+	query += ` ORDER BY r.global_remote DESC, r.contractor_friendly DESC, r.first_seen_at DESC`
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var roles []ats.JobPosting
+	for rows.Next() {
+		var r ats.JobPosting
+		var internalID int64
+		var kwCSV string
+		var globalRem, contractorFr bool
+		var postedAtRaw, firstSeenRaw, lastSeenRaw any
+		if err := rows.Scan(
+			&r.CompanyDomain, &r.CompanyName,
+			&internalID, &r.ID, &r.Title, &r.URL, &r.ApplyURL,
+			&r.Location, &r.Department, &r.Seniority, &kwCSV, &postedAtRaw,
+			&r.WorkplaceType, &r.RemotePolicy, &globalRem, &contractorFr,
+			&r.Compensation, &firstSeenRaw, &lastSeenRaw,
+		); err != nil {
+			return nil, err
+		}
+		r.PostedAt = parseSQLiteTime(postedAtRaw)
+		r.GlobalRemote = globalRem
+		r.ContractorFriendly = contractorFr
+		r.FirstSeenAt = parseSQLiteTime(firstSeenRaw)
+		r.LastSeenAt = parseSQLiteTime(lastSeenRaw)
+		if r.ApplyURL == "" {
+			r.ApplyURL = r.URL
+		}
+		if kwCSV != "" {
+			r.Keywords = strings.Split(kwCSV, ",")
+		}
+		if !filter.Since.IsZero() && !r.FirstSeenAt.Before(filter.Since) {
+			r.IsNew = true
+		}
+		roles = append(roles, r)
+	}
+
+	return roles, nil
+}
+
+// CrawlRun records metadata and yield numbers for a single autonomous run.
+type CrawlRun struct {
+	ID             int64     `json:"id"`
+	RunID          string    `json:"run_id"`
+	StartedAt      time.Time `json:"started_at"`
+	CompletedAt    time.Time `json:"completed_at"`
+	TotalCompanies int       `json:"total_companies"`
+	TotalRoles     int       `json:"total_roles"`
+	NewRoles       int       `json:"new_roles"`
+	TotalLeads     int       `json:"total_leads"`
+	NewLeads       int       `json:"new_leads"`
+	ReportDir      string    `json:"report_dir"`
+}
+
+// RecordCrawlRun persists the summary of an autonomous discovery execution.
+func (s *Store) RecordCrawlRun(ctx context.Context, run *CrawlRun) error {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO crawl_runs (
+			run_id, started_at, completed_at, total_companies, total_roles,
+			new_roles, total_leads, new_leads, report_dir
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(run_id) DO UPDATE SET
+			completed_at = excluded.completed_at,
+			total_companies = excluded.total_companies,
+			total_roles = excluded.total_roles,
+			new_roles = excluded.new_roles,
+			total_leads = excluded.total_leads,
+			new_leads = excluded.new_leads,
+			report_dir = excluded.report_dir
+	`, run.RunID, run.StartedAt, run.CompletedAt, run.TotalCompanies, run.TotalRoles,
+		run.NewRoles, run.TotalLeads, run.NewLeads, run.ReportDir)
+	if err != nil {
+		return err
+	}
+	if run.ID == 0 {
+		run.ID, _ = res.LastInsertId()
+	}
+	return nil
+}
+
+// GetLastCrawlRun returns the most recently completed crawl run.
+func (s *Store) GetLastCrawlRun(ctx context.Context) (*CrawlRun, error) {
+	row := s.db.QueryRowContext(ctx, `
+		SELECT id, run_id, started_at, COALESCE(completed_at, started_at),
+		       total_companies, total_roles, new_roles, total_leads, new_leads, COALESCE(report_dir, '')
+		FROM crawl_runs
+		ORDER BY started_at DESC
+		LIMIT 1
+	`)
+	var r CrawlRun
+	var startedRaw, completedRaw any
+	err := row.Scan(&r.ID, &r.RunID, &startedRaw, &completedRaw, &r.TotalCompanies,
+		&r.TotalRoles, &r.NewRoles, &r.TotalLeads, &r.NewLeads, &r.ReportDir)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.StartedAt = parseSQLiteTime(startedRaw)
+	r.CompletedAt = parseSQLiteTime(completedRaw)
+	return &r, nil
+}
+
+// parseSQLiteTime safely converts interface{} values returned by SQLite (string, []byte, time.Time)
+// into a valid time.Time. This is especially necessary when functions like COALESCE() strip column type affinity.
+func parseSQLiteTime(val any) time.Time {
+	if val == nil {
+		return time.Time{}
+	}
+	switch v := val.(type) {
+	case time.Time:
+		return v
+	case string:
+		if v == "" {
+			return time.Time{}
+		}
+		layouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02 15:04:05.999999999-07:00",
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02 15:04:05-07:00",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05",
+			"2006-01-02",
+		}
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, v); err == nil {
+				return t
+			}
+		}
+	case []byte:
+		return parseSQLiteTime(string(v))
+	}
+	return time.Time{}
+}
+
