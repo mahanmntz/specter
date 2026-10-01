@@ -1,0 +1,23 @@
+# Binaries
+specter
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# SQLite databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Test artifacts
+test_*.db
+test_reports_out/
+test_sources_out/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
