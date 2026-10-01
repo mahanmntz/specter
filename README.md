@@ -1,6 +1,6 @@
 # Specter ⚡
 
-**Specter** is a high-performance, autonomous CLI reconnaissance and engineering lead discovery engine written in pure Go (1.23+). Designed for engineering leaders, technical recruiters, and founders, Specter discovers high-signal backend hiring indicators, maps public ATS boards (Greenhouse, Lever, Ashby, direct portals), mines public Git commit metadata and patch headers for verified contact emails, enforces provenance lineage, and produces executive Markdown dossiers with personalized outreach drafts.
+**Specter** is a high-performance, autonomous CLI reconnaissance and engineering lead discovery engine written in pure Go (1.23+). Designed for engineering leaders, technical recruiters, founders, and global remote software engineers, Specter discovers high-signal backend hiring indicators, maps public ATS boards (Greenhouse, Lever, Ashby, direct portals), detects **worldwide contractor-friendly (sanction-resilient) positions with deep one-click application links**, mines public Git commit metadata and patch headers for verified contact emails, enforces provenance lineage, and produces date-stamped execution archives with delta tracking.
 
 ---
 
@@ -8,9 +8,9 @@
 
 ```mermaid
 graph TD
-    subgraph Inputs
-        CLI["CLI Command (scan / report / leads)"]
-        Seeds["Embedded Seed Catalog (40+ Infra / Go Targets)"]
+    subgraph Inputs ["CLI & Seed Catalog"]
+        CLI["CLI Commands (scan / apply / report / leads)"]
+        Seeds["Embedded Seed Catalog (75+ Infra / Distributed Systems / Crypto Targets)"]
     end
 
     subgraph Crawler_Core ["Crawler & Network Engine"]
@@ -29,6 +29,8 @@ graph TD
         Ashby_Adapter["Ashby Board Adapter"]
         Generic_Adapter["Generic DOM ATS Crawler"]
         Matcher["Backend Tech Matcher (Go, Redis, Distributed Systems)"]
+        RemotePolicy["Remote Policy & Sanction-Resilient Classifier"]
+        DirectApply["Direct Deep-Apply Form Generator (#app, /apply)"]
     end
 
     subgraph Recon_Mining ["Signals & Reconnaissance"]
@@ -41,32 +43,31 @@ graph TD
 
     subgraph Storage_Frontier ["Persistence & State"]
         Frontier["SQLite Crawl Frontier (TTL Deduplication)"]
+        RunTracker["Crawl Runs & Delta Tracker (FirstSeen / LastSeen)"]
         DB[(Pure Go SQLite Store: specter.db)]
     end
 
     subgraph Outputs ["Reports & Deliverables"]
         TerminalUI["Real-time ANSI Terminal Dashboard"]
+        DirectApplyMD["Direct-Apply Dashboard (direct_apply_*.md)"]
+        DeltaMD["Recon Delta Summary (delta_summary_*.md)"]
         Dossier["Executive Markdown Dossier (Dossiers/*.md)"]
         Analytics["Source Analytics & Yield Report (sources_analytics_*.md)"]
-        Export["JSON / CSV Exporter"]
+        RunsManager["Run Directory Manager (reports/runs/YYYY-MM-DD_HH-MM-SS/)"]
+        Export["JSON / CSV / Roles-CSV Exporter"]
     end
 
     CLI --> Seeds
     Seeds --> Registry
     CLI --> Registry
 
-    Registry --> GH_Adapter
-    Registry --> Lever_Adapter
-    Registry --> Ashby_Adapter
-    Registry --> Generic_Adapter
-
+    Registry --> GH_Adapter & Lever_Adapter & Ashby_Adapter & Generic_Adapter
     GH_Adapter & Lever_Adapter & Ashby_Adapter & Generic_Adapter --> Fetcher
     Fetcher --> Pacer --> Jitter --> Breaker
     Fetcher --> TokenPool
     Fetcher --> ETagCache
 
-    Fetcher --> Matcher
-    Matcher --> DB
+    Fetcher --> Matcher --> RemotePolicy --> DirectApply --> DB
 
     DB --> Miner
     Miner --> Fetcher
@@ -78,11 +79,15 @@ graph TD
 
     Fetcher <--> Frontier
     Frontier <--> DB
+    DB <--> RunTracker
 
     DB --> TerminalUI
+    DB --> DirectApplyMD
+    DB --> DeltaMD
     DB --> Dossier
     DB --> Analytics
     DB --> Export
+    DirectApplyMD & DeltaMD & Dossier & Analytics --> RunsManager
 ```
 
 ---
@@ -97,97 +102,84 @@ sequenceDiagram
     participant Frontier as Crawl Frontier (SQLite)
     participant Fetcher as Fetcher & Pacer
     participant ATS as ATS Adapters
+    participant Policy as Remote Policy Classifier
     participant Miner as Git Miner
-    participant BotGate as Bot Gatekeeper
     participant Store as SQLite Store
-    participant Reporter as Markdown Reporter
+    participant RunMgr as Run & Delta Manager
 
-    User->>CLI: specter scan --target=boards.greenhouse.io/cockroachlabs --github=cockroachdb
-    CLI->>Frontier: Check ShouldCrawl(domain, TTL)
-    alt Within TTL
-        Frontier-->>CLI: Skip (Already Crawled)
-    else Expired or Unvisited
-        Frontier-->>CLI: Proceed
-        CLI->>Fetcher: Fetch ATS Job Board (inject ETag if cached)
-        Fetcher->>ATS: Ingest Open Positions
-        ATS-->>Store: Save Company Meta & Backend Roles
-        CLI->>Miner: Mine GitHub Org Repositories
-        loop Commits & Patches
-            Miner->>Fetcher: Query Commits (Paced 1.2 rps + Jitter)
-            Fetcher-->>Miner: Commit List & Author Info
-            Miner->>BotGate: Check IsBotOrCI(name, handle, email)
-            alt Bot Detected
-                BotGate-->>Miner: Drop ([bot], CI, automation)
-            else Verified Human
-                Miner->>Fetcher: Fetch .patch header (if email hidden)
-                Miner->>Miner: Classify Archetype & Score Synergy (0-100)
-                Miner->>Miner: Enrich Bio, Web, and LinkedIn OSINT
-                Miner-->>Store: Save Engineering Lead with Provenance
+    User->>CLI: specter scan --all --concurrency 4
+    CLI->>RunMgr: InitRunDir(timestamp) -> reports/runs/YYYY-MM-DD_HH-MM-SS/
+    CLI->>Store: GetLastCrawlRun() -> prevRun baseline
+    loop Every Target Seed (75+ Curated)
+        CLI->>Frontier: Check ShouldCrawl(domain, TTL)
+        alt Within TTL
+            Frontier-->>CLI: Skip (Already Crawled)
+        else Expired or Unvisited
+            Frontier-->>CLI: Proceed
+            CLI->>Fetcher: Fetch ATS Job Board (inject ETag if cached)
+            Fetcher->>ATS: Ingest Open Positions
+            ATS->>Policy: ClassifyRemotePolicy(location, description)
+            Policy-->>ATS: TierGlobalRemote / DirectApplyURL (#app, /apply)
+            ATS->>Store: SaveCompanyAndRoles (tracks first_seen_at & is_new)
+            CLI->>Miner: Mine GitHub Org Repositories
+            loop Commits & Patches
+                Miner->>Fetcher: Query Commits (Paced 1.2 rps + Jitter)
+                Fetcher-->>Miner: Commit List & Author Info
+                Miner->>Miner: Check IsBotOrCI (Drop bots & CI)
+                Miner->>Fetcher: Fetch .patch header (extract hidden emails)
+                Miner->>Miner: Score Synergy (0-100) & Enrich OSINT
+                Miner->>Store: SaveEngineeringLead with provenance
             end
         end
-        CLI->>Reporter: Generate Executive Dossier & Sources Analytics
-        Reporter-->>User: ./reports/cockroachlabs.com_leads_*.md & sources_analytics_*.md
     end
+    CLI->>Store: RecordCrawlRun(currentRun)
+    CLI->>RunMgr: Generate direct_apply.md, delta_summary.md, dossiers
+    CLI->>RunMgr: LinkLatestRun(runDir) -> reports/latest/
+    RunMgr-->>User: 🎯 Direct Apply & Delta Reports Ready in reports/latest/
 ```
 
 ---
 
-## Core Capabilities & Technical Highlights
+## Key Capabilities & Features
 
-### 1. Adaptive Networking, Pacing & Circuit Breaker
-- **Per-Host Token Buckets:** Strict rate limits via `golang.org/x/time/rate`:
-  - `api.github.com` capped at `1.2 req/s` (burst: 2).
-  - ATS and generic portals capped at `2.0 req/s` (burst: 4).
-- **Randomized Timing Jitter:** Introduces randomized delay between `300ms` and `1200ms` per outgoing request to prevent deterministic traffic profiling.
-- **Canary Circuit Breaker:**
-  - Transitions across `StateClosed`, `StateOpen`, and `StateHalfOpen`.
-  - Automatically triggers on HTTP 429 (Too Many Requests) or HTTP 403 (Rate Limit Exceeded).
-  - Parses `Retry-After` or applies truncated exponential backoff ($2^n \times \text{base\_delay} + \text{jitter}$, max 60s).
-  - Upon backoff expiry, releases exactly **one canary probe** while holding other workers on a broadcast channel. Successful canary re-opens the queue; failure escalates backoff.
+### 1. 🎯 Direct One-Click Apply Dashboard (`specter apply`)
+- **Direct Form Deep-Linking:** Automatically extracts and rewrites job posting URLs into direct application form deep links:
+  - **Greenhouse:** Appends `#app` anchor to bypass marketing blurbs and jump straight to the submission form.
+  - **Lever:** Points to `/apply` endpoints directly.
+  - **Ashby:** Deep-links into `/application` forms.
+- **Fast-Track Pitch Generator:** Generates a custom 3-sentence application note emphasizing asynchronous distributed systems experience and pre-configured B2B contractor invoicing (Deel/crypto) to eliminate corporate hesitation.
 
-### 2. Multi-Token GitHub Pool & Quota Manager
-- **Multi-Token Loading:** Loads tokens from `GITHUB_TOKENS` (comma-separated) or `GITHUB_TOKEN`.
-- **Health & Quota Tracking:** Tracks `Remaining`, `ResetAt`, and `IsCooling` per token.
-- **Cooling Threshold:** If a token drops below 25 remaining requests, it automatically enters a cooling period until its reset timestamp.
-- **Dynamic Reset Wait:** If all tokens are cooling, blocks dynamically until the earliest `ResetAt` rather than dropping requests.
-- **Header Synchronization:** Inspects `X-RateLimit-Remaining` and `X-RateLimit-Reset` on every response to maintain live synchronization.
+### 2. 🌍 Global-Remote & Third-World / Sanction-Friendly Classifier
+Engineers located in non-US/EU emerging tech markets (MENA, LATAM, Eastern Europe, South Asia) frequently encounter compliance walls (W-2 requirements, US citizenship, strict export controls). Specter classifies roles into 3 distinct tiers:
+- 🟢 **Worldwide / Contractor-Friendly (`TierGlobalRemote`):** Explicitly welcomes global candidates, uses contractor/B2B invoicing via **Deel / Remote.com / crypto (USDC)**, has zero domestic tax residency barriers.
+- 🟡 **Timezone-Flexible (`TierTimezoneFlexible`):** Remote positions requiring timezone overlap (e.g. EMEA / UTC ± 3 hours).
+- 🔴 **Geo-Restricted (`TierGeoRestricted`):** Domestic US/EU only, strict W-2 payroll, or security clearance requirements.
 
-### 3. Conditional Requests via ETags
-- **Persistent Conditional Caching:** Stores `ETag` and `Last-Modified` in SQLite `crawl_frontier`.
-- **Automatic Header Injection:** Injects `If-None-Match` and `If-Modified-Since` on repeat visits.
-- **HTTP 304 Handling:** Bypasses body reading and JSON decoding on 304 Not Modified, updating `last_crawled_at` with zero quota consumption.
+### 3. 🔄 Run-Based Date-Stamped Directories & Delta Tracking
+- **Automated Run Isolation:** Every autonomous scan stores output files in an immutable, date-stamped folder:
+  ```
+  reports/runs/2026-10-01_18-30-00/
+  ├── direct_apply_2026-10-01.md
+  ├── delta_summary_2026-10-01.md
+  ├── sources_analytics_2026-10-01.md
+  └── {company}_leads_2026-10-01.md
+  ```
+- **Live Latest Pointer:** Atomically links `reports/latest` to the most recent run so you never have to search for the newest report.
+- **Delta Summary (`delta_summary.md`):** Automatically compares against the previous crawl run from SQLite (`crawl_runs`), highlighting:
+  - `+N fresh roles` discovered for the first time (`[NEW]` badge).
+  - `+M fresh engineering leads` sourced since the last run.
+  - Prevents duplicate candidate outreach and redundant job applications.
 
-### 4. Strict Bot & CI/CD Exclusion
-- Immediate exclusion gate for automated bots and CI accounts.
-- Blocks bot names/handles containing `[bot]`, `ci`, `cd`, `automation`, `teamcity`, `jenkins`, `circleci`, `buildkite`, `dependabot`, `sentry`, `codecov`, `-bot`, `bot-`.
-- Drops automated emails like `noreply.github.com`, `actions@`, `teamcity@`, `dependabot@`, etc.
+### 4. 💎 75+ Embedded High-Signal Curated Seeds
+Pre-configured with leading infrastructure, database, and devtools companies known for hiring worldwide contractors and distributed systems engineers:
+- **Core Cloud & Systems:** HashiCorp, Cloudflare, Grafana Labs, CockroachDB, Monzo, Fly.io, Meilisearch, Timescale, Supabase, 1Password, Tailscale, Datadog, Docker, Redpanda, ScyllaDB, ClickHouse, Neon.
+- **Remote-First Pioneers & Boutique Devtools:** Canonical, Automattic, DuckDuckGo, PostHog, Status.im, Kraken, LiveKit, Railway, Deno, QuestDB, Tinybird, Doppler, Incident.io, Turso, Warp, Depot, Upstash, Resend, Infracost, GitBook, Axiom, Teleport, Qdrant, DragonflyDB.
 
-### 5. Data Provenance & Lineage
-- Every engineering lead is tracked with exact source attribution:
-  - `repo_name` & `repo_url` (e.g. `cockroachdb/pebble`)
-  - `commit_sha` & `commit_url` (e.g. `0457a36` clickable link to GitHub commit)
-  - `bio`, `website_url`, `location`
-  - `linkedin_url` (parsed from profile/blog or deterministic Google OSINT search fallback)
-  - `matched_signals` (Go, Distributed Systems, High Throughput, Concurrency)
-
-### 6. Backend Role Archetypes & Synergy Scoring
-- Categorizes engineers into archetypes:
-  - **Engineering Leadership:** VP, Director, Head of Engineering, Engineering Manager, Lead Architect.
-  - **Staff / Principal:** Principal Engineer, Staff Engineer, Distributed Systems Architect.
-  - **Senior Backend:** Senior Go Engineer, Senior Systems Engineer.
-  - **Core Contributor:** Core Storage Engineer, Core Networking Engineer, etc.
-- Word-boundary tokenization prevents false positives (e.g. `refactor` does not trigger `cto`).
-- 0–100 synergy score incorporates commit volume, language synergy, and role impact.
-
-### 7. Executive Dossiers & Sources Analytics Reports
-- **Executive Dossier (`reports/{domain}_leads_{date}.md`):**
-  - Company Overview, hiring demand, headquarters, and tech fingerprint.
-  - Leads Matrix: Score, Name, Archetype, Email, GitHub, LinkedIn/Web, Provenance (Commit / Repo), Top Tech.
-  - Contextual Outreach Drafts: 3 customized icebreakers tailored to Leadership, Staff, and Senior Contributor archetypes.
-- **Aggregated Sources Analytics (`reports/sources_analytics_{date}.md`):**
-  - Top producing repositories ranked by lead yield.
-  - Repository yield table with commit count, verified leads, extracted emails, and yield percentage.
-  - Lead lineage, archetype distribution, and target domain coverage.
+### 5. 🛡️ Resilient Networking & Bot Filtration
+- **Adaptive Pacer:** Per-host token buckets (1.2 rps GitHub, 2.0 rps ATS) with 300–1200ms randomized jitter.
+- **Canary Circuit Breaker:** Exponential backoff upon HTTP 429/403 with single-worker canary probes.
+- **Multi-Token GitHub Pool:** Automatic round-robin rotation, remaining quota inspection, and cooling periods.
+- **Bot Exclusions:** Blocks `[bot]`, CI/CD pipelines, Dependabot, Jenkins, TeamCity, and `noreply.github.com` addresses.
 
 ---
 
@@ -197,40 +189,44 @@ sequenceDiagram
 specter/
 ├── cmd/
 │   └── specter/
-│       └── main.go                 # CLI entry point (scan, leads, report, roles, companies, export)
+│       └── main.go                 # CLI entry point (scan, apply, leads, report, roles, companies, export)
 ├── configs/
-│   └── seeds.json                 # Pre-populated catalog of 40+ high-signal backend companies
+│   └── seeds.json                 # Pre-populated catalog of 75+ curated tech companies
 ├── internal/
 │   ├── ats/
-│   │   ├── ashby.go               # Ashby job-board API adapter
+│   │   ├── ashby.go               # Ashby job-board API adapter with direct application links
 │   │   ├── generic.go             # Generic HTML DOM crawler with embedded ATS detection
-│   │   ├── greenhouse.go          # Greenhouse public boards API adapter
-│   │   ├── lever.go               # Lever public postings API adapter
-│   │   ├── models.go              # ATS domain models & CompanyMeta
+│   │   ├── greenhouse.go          # Greenhouse public boards API adapter (#app deep-linking)
+│   │   ├── lever.go               # Lever public postings API adapter (/apply deep-linking)
+│   │   ├── models.go              # ATS domain models, JobPosting & CompanyMeta
 │   │   └── registry.go            # Adapter resolution and dispatch engine
 │   ├── crawler/
 │   │   ├── fetcher.go             # Resilient HTTP client (SSRF guard, conn pool, ETag injection)
 │   │   ├── frontier.go            # Persistent crawl frontier, SQLite TTL cache, conditional headers
 │   │   ├── pacer.go               # Per-host token buckets, jitter engine, canary circuit breaker
-│   │   ├── ratelimit.go           # Adaptive host rate limiter (backwards compatibility)
-│   │   ├── scope.go               # Domain boundary & subdomain scoping rules
-│   │   └── token_pool.go          # Multi-token pool, quota tracker, cooling thresholds
+│   │   ├── token_pool.go          # Multi-token pool, quota tracker, cooling thresholds
+│   │   └── scope.go               # Domain boundary & subdomain scoping rules
 │   ├── exporter/
-│   │   └── export.go              # JSON and CSV lead exporter
+│   │   └── export.go              # JSON, CSV, and Roles-CSV exporter
 │   ├── reporter/
-│   │   ├── markdown.go            # Executive technical dossier generator with archetype outreach
+│   │   ├── direct_apply.go        # One-click direct application dashboard generator
+│   │   ├── delta_report.go        # Delta comparison report between crawl runs
+│   │   ├── runs_manager.go        # Date-stamped run directory isolation & latest link pointer
+│   │   ├── markdown.go            # Executive technical dossier generator with outreach drafts
 │   │   └── sources_report.go      # Sources analytics & repository lead yield generator
 │   ├── seeds/
 │   │   └── seeds.go               # Embedded target seed catalog loader
 │   ├── signals/
 │   │   ├── git_miner.go           # Public Git miner, email harvester, patch parser, bot gate
-│   │   ├── github.go              # GitHub repository and commit exploration helpers
-│   │   └── matcher.go             # Backend keyword and technology matcher
+│   │   ├── matcher.go             # Backend keyword and technology matcher
+│   │   └── remote_policy.go       # Remote policy, sanction resilience, and quick pitch generator
 │   ├── storage/
 │   │   └── store.go               # Pure Go SQLite store (modernc.org/sqlite) & schema migrations
 │   └── ui/
 │       └── progress.go            # Real-time ANSI terminal progress tracker
-├── reports/                       # Generated dossiers and source analytics reports
+├── reports/                       # Generated dossiers, direct apply dashboards, and run archives
+│   ├── latest -> runs/...         # Symlink to the most recent crawl run
+│   └── runs/                      # Historical date-stamped execution archives
 ├── go.mod
 ├── go.sum
 └── README.md
@@ -250,61 +246,75 @@ go build -o specter ./cmd/specter
 
 ---
 
-## CLI Usage
+## CLI Usage Guide
 
 ### 1. Autonomous Run Across Seed Catalog
-Scan all 40+ pre-configured high-signal backend and infrastructure targets:
+Launch an autonomous discovery run across the curated catalog of 75+ targets:
 ```bash
-./specter scan --all --concurrency=4 --limit=10 --ttl=7
+./specter scan --all --concurrency=4 --limit=15 --ttl=7
+```
+Output:
+- Saves all dossiers, direct-apply dashboards, and delta summaries to `reports/runs/YYYY-MM-DD_HH-MM-SS/`.
+- Updates `reports/latest` symlink.
+
+### 2. Direct One-Click Apply Board (`specter apply`)
+Query active roles with direct deep-application links:
+
+```bash
+# List all worldwide & contractor-friendly roles (sanction-resilient)
+./specter apply --global-only
+
+# Filter for brand-new openings discovered since the last run
+./specter apply --global-only --fresh-only
+
+# Filter by company domain and generate a markdown dashboard
+./specter apply --domain=canonical.com --export
 ```
 
-### 2. Single Target Scan
+### 3. Targeted Single Scan
 Scan a specific company ATS board and GitHub organization:
 ```bash
-# Greenhouse board
-./specter scan --target=boards.greenhouse.io/cockroachlabs --github=cockroachdb --ttl=0
+# Greenhouse board with GitHub miner
+./specter scan --target=boards.greenhouse.io/canonical --github=canonical --ttl=0
 
 # Lever board
-./specter scan --target=jobs.lever.co/netflix
+./specter scan --target=jobs.lever.co/posthog
 
 # Ashby board
-./specter scan --target=jobs.ashbyhq.com/linear
+./specter scan --target=jobs.ashbyhq.com/livekit
 ```
 
-### 3. Discovered Leads Querying
+### 4. Discovered Leads Management
 List all verified engineering leads sorted by synergy score:
 ```bash
-./specter leads list
+./specter leads list --uncontacted
 ```
 
-Filter by domain or uncontacted status:
+Filter by domain:
 ```bash
-./specter leads list --domain=cockroachlabs.com --uncontacted
+./specter leads list --domain=cockroachlabs.com
 ```
 
 Mark lead as contacted:
 ```bash
-./specter leads contact --id=1
+./specter leads contact --id=42
 ```
 
-### 4. Generate Reports
-Regenerate an executive dossier for a scanned domain:
+### 5. Export Datasets
+Export all records to JSON or CSV:
 ```bash
-./specter report --domain=cockroachlabs.com --out-dir=reports
-```
+# Export direct apply roles to CSV
+./specter export --format=roles-csv --output=direct_apply_roles.csv
 
-### 5. Export Data
-Export all leads and open roles to JSON or CSV:
-```bash
-./specter export --format=json --output=leads.json
-./specter export --format=csv --output=leads.csv
+# Export full database bundle to JSON
+./specter export --format=json --output=specter_full.json
 ```
 
 ---
 
-## Test Suite & Race Detector
+## Testing & Quality Assurance
 
-All packages are tested with Go's race detector enabled:
+Specter is strictly tested with Go's race detector enabled:
 
 ```bash
 go test -v -race ./...
@@ -314,4 +324,4 @@ go test -v -race ./...
 
 ## License
 
-MIT License. Built for ethical technical reconnaissance and engineering discovery.
+MIT License. Designed for ethical engineering reconnaissance, lead discovery, and frictionless global remote opportunities.
