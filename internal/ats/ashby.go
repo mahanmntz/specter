@@ -109,15 +109,22 @@ func (a *AshbyAdapter) ExtractByBoardID(ctx context.Context, orgToken, domain st
 			jobURL = fmt.Sprintf("https://jobs.ashbyhq.com/%s/%s", orgToken, j.ID)
 		}
 
+		policy := signals.ClassifyRemotePolicy(j.Location, j.Title+" "+j.Department, jobURL)
+
 		meta.OpenRoles = append(meta.OpenRoles, JobPosting{
-			ID:         fmt.Sprintf("ashby-%s", j.ID),
-			Title:      j.Title,
-			URL:        jobURL,
-			Location:   j.Location,
-			Department: j.Department,
-			Seniority:  signals.ExtractSeniority(j.Title),
-			Keywords:   matchedKws,
-			PostedAt:   postedTime,
+			ID:                 fmt.Sprintf("ashby-%s", j.ID),
+			Title:              j.Title,
+			URL:                jobURL,
+			ApplyURL:           policy.DirectApplyURL,
+			Location:           j.Location,
+			Department:         j.Department,
+			Seniority:          signals.ExtractSeniority(j.Title),
+			Keywords:           matchedKws,
+			PostedAt:           postedTime,
+			WorkplaceType:      policy.PolicyName,
+			RemotePolicy:       policy.Badge,
+			GlobalRemote:       policy.IsGlobalRemote,
+			ContractorFriendly: policy.IsContractorFriendly,
 		})
 	}
 
