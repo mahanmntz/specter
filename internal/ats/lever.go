@@ -35,11 +35,13 @@ type leverPosting struct {
 	HostedURL  string `json:"hostedUrl"`
 	CreatedAt  int64  `json:"createdAt"`
 	Categories struct {
-		Commitment string `json:"commitment"`
-		Department string `json:"department"`
-		Location   string `json:"location"`
-		Team       string `json:"team"`
+		Commitment    string `json:"commitment"`
+		Department    string `json:"department"`
+		Location      string `json:"location"`
+		Team          string `json:"team"`
+		WorkplaceType string `json:"workplaceType"`
 	} `json:"categories"`
+	WorkplaceType    string `json:"workplaceType"`
 	DescriptionPlain string `json:"descriptionPlain"`
 	AdditionalPlain  string `json:"additionalPlain"`
 }
@@ -108,15 +110,22 @@ func (l *LeverAdapter) ExtractByBoardID(ctx context.Context, companyToken, domai
 			postedAt = time.UnixMilli(p.CreatedAt).UTC()
 		}
 
+		policy := signals.ClassifyRemotePolicy(p.Categories.Location+" "+p.Categories.WorkplaceType, combined, p.HostedURL)
+
 		meta.OpenRoles = append(meta.OpenRoles, JobPosting{
-			ID:          fmt.Sprintf("lever-%s", p.ID),
-			Title:       p.Text,
-			URL:         p.HostedURL,
-			Location:    p.Categories.Location,
-			Department:  dept,
-			Seniority:   signals.ExtractSeniority(p.Text),
-			Keywords:    matchedKws,
-			PostedAt:    postedAt,
+			ID:                 fmt.Sprintf("lever-%s", p.ID),
+			Title:              p.Text,
+			URL:                p.HostedURL,
+			ApplyURL:           policy.DirectApplyURL,
+			Location:           p.Categories.Location,
+			Department:         dept,
+			Seniority:          signals.ExtractSeniority(p.Text),
+			Keywords:           matchedKws,
+			PostedAt:           postedAt,
+			WorkplaceType:      policy.PolicyName,
+			RemotePolicy:       policy.Badge,
+			GlobalRemote:       policy.IsGlobalRemote,
+			ContractorFriendly: policy.IsContractorFriendly,
 		})
 	}
 
