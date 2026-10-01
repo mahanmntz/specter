@@ -116,15 +116,22 @@ func (g *GreenhouseAdapter) ExtractByBoardID(ctx context.Context, boardToken, do
 			}
 		}
 
+		policy := signals.ClassifyRemotePolicy(j.Location.Name, j.Content, j.AbsoluteURL)
+
 		meta.OpenRoles = append(meta.OpenRoles, JobPosting{
-			ID:          fmt.Sprintf("gh-%d", j.ID),
-			Title:       j.Title,
-			URL:         j.AbsoluteURL,
-			Location:    j.Location.Name,
-			Department:  deptName,
-			Seniority:   signals.ExtractSeniority(j.Title),
-			Keywords:    matchedKws,
-			PostedAt:    postedTime,
+			ID:                 fmt.Sprintf("gh-%d", j.ID),
+			Title:              j.Title,
+			URL:                j.AbsoluteURL,
+			ApplyURL:           policy.DirectApplyURL,
+			Location:           j.Location.Name,
+			Department:         deptName,
+			Seniority:          signals.ExtractSeniority(j.Title),
+			Keywords:           matchedKws,
+			PostedAt:           postedTime,
+			WorkplaceType:      policy.PolicyName,
+			RemotePolicy:       policy.Badge,
+			GlobalRemote:       policy.IsGlobalRemote,
+			ContractorFriendly: policy.IsContractorFriendly,
 		})
 	}
 
