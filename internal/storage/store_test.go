@@ -178,3 +178,106 @@ func TestSaveEngineeringLeadsProvenanceAndEnrichment(t *testing.T) {
 	}
 }
 
+func TestDirectApplyRolesAndCrawlRuns(t *testing.T) {
+	tmpDB := "test_apply_runs.db"
+	defer os.Remove(tmpDB)
+
+	store, err := NewStore(tmpDB)
+	if err != nil {
+		t.Fatalf("failed creating store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// 1. Save company and roles with remote policy
+	meta := &ats.CompanyMeta{
+		Name:       "Distributed Corp",
+		Domain:     "distcorp.io",
+		CareersURL: "https://jobs.lever.co/distcorp",
+		Signals:    []string{"go", "distributed"},
+		OpenRoles: []ats.JobPosting{
+			{
+				ID:                 "dist-1",
+				Title:              "Staff Go Systems Architect",
+				URL:                "https://jobs.lever.co/distcorp/1",
+				ApplyURL:           "https://jobs.lever.co/distcorp/1/apply",
+				Location:           "Worldwide",
+				Department:         "Infrastructure",
+				Seniority:          "Staff/Principal",
+				Keywords:           []string{"go", "distributed"},
+				WorkplaceType:      "Global Remote (Anywhere)",
+				RemotePolicy:       "🟢 Worldwide / Contractor-Friendly",
+				GlobalRemote:       true,
+				ContractorFriendly: true,
+				Compensation:       "$160,000 - $210,000",
+				PostedAt:           time.Now().UTC(),
+			},
+			{
+				ID:                 "dist-2",
+				Title:              "Senior Backend Engineer (US)",
+				URL:                "https://jobs.lever.co/distcorp/2",
+				ApplyURL:           "https://jobs.lever.co/distcorp/2/apply",
+				Location:           "US Only",
+				Department:         "Product",
+				Seniority:          "Senior",
+				Keywords:           []string{"go"},
+				WorkplaceType:      "Geo-Restricted",
+				RemotePolicy:       "🔴 Geo-Restricted (Domestic / W-2)",
+				GlobalRemote:       false,
+				ContractorFriendly: false,
+				PostedAt:           time.Now().UTC(),
+			},
+		},
+	}
+
+	_, newRoles, err := store.SaveCompanyAndRoles(ctx, meta)
+	if err != nil || newRoles != 2 {
+		t.Fatalf("expected 2 new roles, got %d, err: %v", newRoles, err)
+	}
+
+	// 2. Query direct apply roles with GlobalOnly filter
+	globalRoles, err := store.ListDirectApplyRoles(ctx, DirectApplyFilter{GlobalOnly: true})
+	if err != nil {
+		t.Fatalf("ListDirectApplyRoles failed: %v", err)
+	}
+	if len(globalRoles) != 1 {
+		t.Fatalf("expected 1 global role, got %d", len(globalRoles))
+	}
+	gr := globalRoles[0]
+	if gr.ApplyURL != "https://jobs.lever.co/distcorp/1/apply" {
+		t.Errorf("expected direct apply url preserved, got %s", gr.ApplyURL)
+	}
+	if !gr.GlobalRemote || !gr.ContractorFriendly {
+		t.Errorf("expected GlobalRemote and ContractorFriendly true")
+	}
+
+	// 3. Test CrawlRun recording and retrieval
+	run := &CrawlRun{
+		RunID:          "2026-10-01_18-00-00",
+		StartedAt:      time.Now().Add(-10 * time.Minute),
+		CompletedAt:    time.Now(),
+		TotalCompanies: 1,
+		TotalRoles:     2,
+		NewRoles:       2,
+		TotalLeads:     5,
+		NewLeads:       5,
+		ReportDir:      "reports/runs/2026-10-01_18-00-00",
+	}
+	if err := store.RecordCrawlRun(ctx, run); err != nil {
+		t.Fatalf("RecordCrawlRun failed: %v", err)
+	}
+
+	lastRun, err := store.GetLastCrawlRun(ctx)
+	if err != nil || lastRun == nil {
+		t.Fatalf("GetLastCrawlRun failed: %v", err)
+	}
+	if lastRun.RunID != "2026-10-01_18-00-00" {
+		t.Errorf("expected run_id 2026-10-01_18-00-00, got %s", lastRun.RunID)
+	}
+	if lastRun.NewRoles != 2 {
+		t.Errorf("expected 2 new roles in last run, got %d", lastRun.NewRoles)
+	}
+}
+
+
