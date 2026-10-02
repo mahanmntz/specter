@@ -19,6 +19,7 @@ import (
 	"specter/internal/seeds"
 	"specter/internal/signals"
 	"specter/internal/storage"
+	"specter/internal/sync"
 	"specter/internal/ui"
 
 	"golang.org/x/sync/errgroup"
@@ -37,6 +38,8 @@ func main() {
 	switch command {
 	case "scan":
 		runScan(os.Args[2:])
+	case "sync":
+		runSync(os.Args[2:])
 	case "apply":
 		runApply(os.Args[2:])
 	case "leads":
@@ -74,6 +77,8 @@ func runScan(args []string) {
 	outDir := fs.String("out-dir", "reports", "Directory to write Markdown reports")
 	ttlDays := fs.Int("ttl", 7, "Frontier deduplication TTL in days (re-crawl if older)")
 	timeoutSec := fs.Int("timeout", 15, "HTTP request timeout in seconds")
+	syncSheets := fs.Bool("sync-sheets", false, "Automatically sync newly discovered leads to Google Sheets upon completion")
+	webhookURL := fs.String("webhook", "", "Custom Google Sheets webhook URL override")
 
 	fs.Parse(args)
 
@@ -325,6 +330,17 @@ func runScan(args []string) {
 		if sPath, sErr := reporter.GenerateSourcesReport(drainCtx, store, miner.GetYieldStats(), runDir); sErr == nil && sPath != "" {
 			fmt.Fprintf(os.Stderr, "📊 Preserved source analytics: %s\n", sPath)
 		}
+		if *syncSheets {
+			drainSyncCtx, drainSyncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer drainSyncCancel()
+			sheetsClient := sync.NewSheetsClient(*webhookURL)
+			_, _ = sheetsClient.SyncLeads(drainSyncCtx, store, sync.SyncOptions{
+				Limit: 100,
+				LogFunc: func(format string, a ...any) {
+					fmt.Fprintf(os.Stderr, format, a...)
+				},
+			})
+		}
 		fmt.Fprintln(os.Stderr, "👋 Specter terminated gracefully. State safely preserved in specter.db.")
 		os.Exit(130)
 	}
@@ -385,6 +401,18 @@ func runScan(args []string) {
 	// Link latest run directory pointer
 	_ = runManager.LinkLatestRun(runDir)
 	fmt.Printf("📁 \033[1;34mRun Directory Archive:\033[0m %s (\033[2mlinked at %s/latest\033[0m)\n", runDir, *outDir)
+
+	// Dispatch Google Sheets synchronization if requested
+	if *syncSheets {
+		fmt.Println()
+		sheetsClient := sync.NewSheetsClient(*webhookURL)
+		_, _ = sheetsClient.SyncLeads(context.Background(), store, sync.SyncOptions{
+			Limit: 200,
+			LogFunc: func(format string, a ...any) {
+				fmt.Printf(format, a...)
+			},
+		})
+	}
 
 	printCatalogSummary(store)
 }
@@ -805,8 +833,9 @@ func printHelp() {
 	fmt.Println(`Specter CLI - Autonomous Recon & Engineering Lead Discovery Engine
 
 Usage:
-  specter scan --all [--concurrency=4] [--limit=10] [--ttl=7]
-  specter scan --target=<ats_or_domain> [--github=<org>] [--concurrency=4]
+  specter scan --all [--concurrency=4] [--limit=10] [--ttl=7] [--sync-sheets]
+  specter scan --target=<ats_or_domain> [--github=<org>] [--concurrency=4] [--sync-sheets]
+  specter sync sheets [--webhook=<url>] [--all] [--limit=100] [--dry-run]
   specter apply [--global-only] [--contractor-only] [--fresh-only] [--domain=<domain>] [--export]
   specter leads list [--domain=<domain>] [--uncontacted]
   specter leads contact --id=<id>
@@ -816,8 +845,11 @@ Usage:
   specter export [--format=json|csv|roles-csv] [--output=<file>]
 
 Examples:
-  specter scan --all --concurrency 4
+  specter scan --all --concurrency 4 --sync-sheets
   specter scan --all --limit 5
+  specter sync sheets --limit 25
+  specter sync sheets --dry-run
+  specter sync sheets --all --webhook="https://script.google.com/macros/s/.../exec"
   specter apply --global-only
   specter apply --contractor-only --fresh-only
   specter scan --target=boards.greenhouse.io/stripe --github=stripe
