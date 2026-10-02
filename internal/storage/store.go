@@ -121,6 +121,8 @@ func NewStore(dbPath string) (*Store, error) {
 		linkedin_url TEXT DEFAULT '',
 		location TEXT DEFAULT '',
 		matched_signals TEXT DEFAULT '[]',
+		synced_to_sheets BOOLEAN DEFAULT 0,
+		synced_at DATETIME,
 		UNIQUE(company_domain, github_handle)
 	);
 
@@ -163,10 +165,13 @@ func NewStore(dbPath string) (*Store, error) {
 		"linkedin_url TEXT DEFAULT ''",
 		"location TEXT DEFAULT ''",
 		"matched_signals TEXT DEFAULT '[]'",
+		"synced_to_sheets BOOLEAN DEFAULT 0",
+		"synced_at DATETIME",
 	}
 	for _, col := range leadCols {
 		_, _ = db.Exec("ALTER TABLE engineering_leads ADD COLUMN " + col)
 	}
+	_, _ = db.Exec("CREATE INDEX IF NOT EXISTS idx_eng_leads_synced ON engineering_leads(synced_to_sheets)")
 
 	roleCols := []string{
 		"apply_url TEXT DEFAULT ''",
@@ -399,7 +404,8 @@ func (s *Store) ListEngineeringLeads(ctx context.Context, domain string, unconta
 		SELECT id, domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
 		       COALESCE(repo_name, ''), COALESCE(repo_url, ''), COALESCE(commit_sha, ''), COALESCE(commit_url, ''),
 		       COALESCE(bio, ''), COALESCE(website_url, ''), COALESCE(linkedin_url, ''), COALESCE(location, ''),
-		       COALESCE(matched_signals, '[]')
+		       COALESCE(matched_signals, '[]'),
+		       COALESCE(synced_to_sheets, 0), synced_at
 		FROM engineering_leads
 		WHERE 1=1
 	`
@@ -422,23 +428,156 @@ func (s *Store) ListEngineeringLeads(ctx context.Context, domain string, unconta
 	var leads []signals.EngineeringLead
 	for rows.Next() {
 		var l signals.EngineeringLead
-		var disc time.Time
+		var discRaw, syncedAtRaw any
 		var sigsJSON string
+		var synced bool
 		if err := rows.Scan(
 			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &l.Source,
-			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &disc, &l.Contacted,
+			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &discRaw, &l.Contacted,
 			&l.RepoName, &l.RepoURL, &l.CommitSHA, &l.CommitURL,
 			&l.Bio, &l.WebsiteURL, &l.LinkedInURL, &l.Location,
-			&sigsJSON,
+			&sigsJSON, &synced, &syncedAtRaw,
 		); err != nil {
 			return nil, err
 		}
-		l.DiscoveredAt = disc
+		l.DiscoveredAt = parseSQLiteTime(discRaw)
+		l.SyncedToSheets = synced
+		l.SyncedAt = parseSQLiteTime(syncedAtRaw)
 		_ = json.Unmarshal([]byte(sigsJSON), &l.MatchedSignals)
 		leads = append(leads, l)
 	}
 
 	return leads, nil
+}
+
+// GetUnsyncedEngineeringLeads retrieves engineering leads that have not yet been synchronized to Google Sheets.
+func (s *Store) GetUnsyncedEngineeringLeads(ctx context.Context, limit int) ([]signals.EngineeringLead, error) {
+	query := `
+		SELECT id, domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
+		       COALESCE(repo_name, ''), COALESCE(repo_url, ''), COALESCE(commit_sha, ''), COALESCE(commit_url, ''),
+		       COALESCE(bio, ''), COALESCE(website_url, ''), COALESCE(linkedin_url, ''), COALESCE(location, ''),
+		       COALESCE(matched_signals, '[]'),
+		       COALESCE(synced_to_sheets, 0), synced_at
+		FROM engineering_leads
+		WHERE (synced_to_sheets = 0 OR synced_to_sheets IS NULL)
+		ORDER BY relevance_score DESC, discovered_at DESC
+	`
+	var args []any
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var leads []signals.EngineeringLead
+	for rows.Next() {
+		var l signals.EngineeringLead
+		var discRaw, syncedAtRaw any
+		var sigsJSON string
+		var synced bool
+		if err := rows.Scan(
+			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &l.Source,
+			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &discRaw, &l.Contacted,
+			&l.RepoName, &l.RepoURL, &l.CommitSHA, &l.CommitURL,
+			&l.Bio, &l.WebsiteURL, &l.LinkedInURL, &l.Location,
+			&sigsJSON, &synced, &syncedAtRaw,
+		); err != nil {
+			return nil, err
+		}
+		l.DiscoveredAt = parseSQLiteTime(discRaw)
+		l.SyncedToSheets = synced
+		l.SyncedAt = parseSQLiteTime(syncedAtRaw)
+		_ = json.Unmarshal([]byte(sigsJSON), &l.MatchedSignals)
+		leads = append(leads, l)
+	}
+
+	return leads, nil
+}
+
+// GetUnsyncedLeads is a convenience wrapper for GetUnsyncedEngineeringLeads with context.Background().
+func (s *Store) GetUnsyncedLeads(limit int) ([]signals.EngineeringLead, error) {
+	return s.GetUnsyncedEngineeringLeads(context.Background(), limit)
+}
+
+// GetAllEngineeringLeadsForSync retrieves all engineering leads regardless of previous sync status.
+func (s *Store) GetAllEngineeringLeadsForSync(ctx context.Context, limit int) ([]signals.EngineeringLead, error) {
+	query := `
+		SELECT id, domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
+		       COALESCE(repo_name, ''), COALESCE(repo_url, ''), COALESCE(commit_sha, ''), COALESCE(commit_url, ''),
+		       COALESCE(bio, ''), COALESCE(website_url, ''), COALESCE(linkedin_url, ''), COALESCE(location, ''),
+		       COALESCE(matched_signals, '[]'),
+		       COALESCE(synced_to_sheets, 0), synced_at
+		FROM engineering_leads
+		ORDER BY relevance_score DESC, discovered_at DESC
+	`
+	var args []any
+	if limit > 0 {
+		query += " LIMIT ?"
+		args = append(args, limit)
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var leads []signals.EngineeringLead
+	for rows.Next() {
+		var l signals.EngineeringLead
+		var discRaw, syncedAtRaw any
+		var sigsJSON string
+		var synced bool
+		if err := rows.Scan(
+			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &l.Source,
+			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &discRaw, &l.Contacted,
+			&l.RepoName, &l.RepoURL, &l.CommitSHA, &l.CommitURL,
+			&l.Bio, &l.WebsiteURL, &l.LinkedInURL, &l.Location,
+			&sigsJSON, &synced, &syncedAtRaw,
+		); err != nil {
+			return nil, err
+		}
+		l.DiscoveredAt = parseSQLiteTime(discRaw)
+		l.SyncedToSheets = synced
+		l.SyncedAt = parseSQLiteTime(syncedAtRaw)
+		_ = json.Unmarshal([]byte(sigsJSON), &l.MatchedSignals)
+		leads = append(leads, l)
+	}
+
+	return leads, nil
+}
+
+// MarkLeadsSynced marks a list of engineering lead IDs as synced to Google Sheets.
+func (s *Store) MarkLeadsSynced(leadIDs []int64) error {
+	return s.MarkLeadsSyncedCtx(context.Background(), leadIDs)
+}
+
+// MarkLeadsSyncedCtx marks a list of engineering lead IDs as synced to Google Sheets with context.
+func (s *Store) MarkLeadsSyncedCtx(ctx context.Context, leadIDs []int64) error {
+	if len(leadIDs) == 0 {
+		return nil
+	}
+
+	placeholders := make([]string, len(leadIDs))
+	args := make([]any, 0, len(leadIDs)+1)
+	args = append(args, time.Now().UTC())
+	for i, id := range leadIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE engineering_leads SET synced_to_sheets = 1, synced_at = ? WHERE id IN (%s)",
+		strings.Join(placeholders, ","),
+	)
+
+	_, err := s.db.ExecContext(ctx, query, args...)
+	return err
 }
 
 // MarkEngineeringLeadContacted updates the contacted status of an engineering lead.

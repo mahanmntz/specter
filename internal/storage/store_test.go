@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -277,6 +278,85 @@ func TestDirectApplyRolesAndCrawlRuns(t *testing.T) {
 	}
 	if lastRun.NewRoles != 2 {
 		t.Errorf("expected 2 new roles in last run, got %d", lastRun.NewRoles)
+	}
+}
+
+func TestSheetsSyncTracking(t *testing.T) {
+	tempDB := filepath.Join(t.TempDir(), "specter_sync_test.db")
+	store, err := NewStore(tempDB)
+	if err != nil {
+		t.Fatalf("failed initializing store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	leads := []signals.EngineeringLead{
+		{
+			Domain:         "cockroachlabs.com",
+			CompanyDomain:  "cockroachlabs.com",
+			Name:           "Dev Alpha",
+			Role:           "Distributed Systems Engineer",
+			Email:          "alpha@cockroachlabs.com",
+			Source:         "git_commit",
+			GitHubHandle:   "devalpha",
+			RelevanceScore: 90,
+			RepoName:       "cockroachdb/cockroach",
+			DiscoveredAt:   time.Now().UTC(),
+		},
+		{
+			Domain:         "canonical.com",
+			CompanyDomain:  "canonical.com",
+			Name:           "Dev Beta",
+			Role:           "Core Linux Engineer",
+			Email:          "beta@canonical.com",
+			Source:         "git_commit",
+			GitHubHandle:   "devbeta",
+			RelevanceScore: 85,
+			RepoName:       "canonical/multipass",
+			DiscoveredAt:   time.Now().UTC(),
+		},
+	}
+
+	n, err := store.SaveEngineeringLeads(ctx, leads)
+	if err != nil || n != 2 {
+		t.Fatalf("SaveEngineeringLeads failed: n=%d, err=%v", n, err)
+	}
+
+	// 1. Initially both should be unsynced
+	unsynced, err := store.GetUnsyncedLeads(10)
+	if err != nil {
+		t.Fatalf("GetUnsyncedLeads failed: %v", err)
+	}
+	if len(unsynced) != 2 {
+		t.Fatalf("expected 2 unsynced leads, got %d", len(unsynced))
+	}
+
+	// 2. Mark the first lead as synced
+	firstID := unsynced[0].ID
+	if err := store.MarkLeadsSynced([]int64{firstID}); err != nil {
+		t.Fatalf("MarkLeadsSynced failed: %v", err)
+	}
+
+	// 3. Now only 1 lead should be unsynced
+	unsyncedAfter, err := store.GetUnsyncedLeads(10)
+	if err != nil {
+		t.Fatalf("GetUnsyncedLeads after sync failed: %v", err)
+	}
+	if len(unsyncedAfter) != 1 {
+		t.Fatalf("expected 1 unsynced lead, got %d", len(unsyncedAfter))
+	}
+	if unsyncedAfter[0].ID == firstID {
+		t.Errorf("expected unsynced lead to not be %d", firstID)
+	}
+
+	// 4. GetAllEngineeringLeadsForSync should still return all 2
+	allLeads, err := store.GetAllEngineeringLeadsForSync(ctx, 10)
+	if err != nil {
+		t.Fatalf("GetAllEngineeringLeadsForSync failed: %v", err)
+	}
+	if len(allLeads) != 2 {
+		t.Fatalf("expected 2 leads for all sync, got %d", len(allLeads))
 	}
 }
 
