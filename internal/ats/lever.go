@@ -61,6 +61,19 @@ func (l *LeverAdapter) ExtractByBoardID(ctx context.Context, companyToken, domai
 		return nil, fmt.Errorf("lever API fetch error: %w", err)
 	}
 
+	compName := formatCompanyName(companyToken)
+	if domain == "" {
+		domain = companyToken + ".com"
+	}
+
+	if res.StatusCode == 304 {
+		return &CompanyMeta{
+			Name:       compName,
+			Domain:     domain,
+			CareersURL: fmt.Sprintf("https://jobs.lever.co/%s", companyToken),
+		}, nil
+	}
+
 	if res.StatusCode != 200 {
 		return nil, fmt.Errorf("lever API returned status %d for company %s", res.StatusCode, companyToken)
 	}
@@ -68,11 +81,6 @@ func (l *LeverAdapter) ExtractByBoardID(ctx context.Context, companyToken, domai
 	var postings []leverPosting
 	if err := json.Unmarshal(res.Body, &postings); err != nil {
 		return nil, fmt.Errorf("failed decoding Lever JSON: %w", err)
-	}
-
-	compName := formatCompanyName(companyToken)
-	if domain == "" {
-		domain = companyToken + ".com"
 	}
 	careersURL := fmt.Sprintf("https://jobs.lever.co/%s", companyToken)
 	meta := &CompanyMeta{

@@ -79,13 +79,14 @@ type FetcherConfig struct {
 // Fetcher provides high-performance, SSRF-guarded HTTP requests with connection pooling,
 // adaptive pacing with jitter, token pool rotation, and ETag conditional caching.
 type Fetcher struct {
-	client       *http.Client
-	userAgent    string
-	maxBodyBytes int64
-	limiter      *AdaptiveHostLimiter
-	pacer        *Pacer
-	tokenPool    *TokenPool
-	frontier     *Frontier
+	client        *http.Client
+	userAgent     string
+	maxBodyBytes  int64
+	limiter       *AdaptiveHostLimiter
+	pacer         *Pacer
+	tokenPool     *TokenPool
+	frontier      *Frontier
+	OnRequestDone func(statusCode int)
 }
 
 // NewFetcher creates a production-ready Fetcher.
@@ -301,6 +302,10 @@ func (f *Fetcher) FetchWithHeaders(ctx context.Context, targetURL string, header
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if f.OnRequestDone != nil {
+		f.OnRequestDone(resp.StatusCode)
+	}
 
 	// 5. Inspect response in Pacer, Limiter, and TokenPool
 	if f.pacer != nil {

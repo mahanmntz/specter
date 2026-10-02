@@ -57,6 +57,19 @@ func (a *AshbyAdapter) ExtractByBoardID(ctx context.Context, orgToken, domain st
 		return nil, fmt.Errorf("ashby API fetch error: %w", err)
 	}
 
+	compName := formatCompanyName(orgToken)
+	if domain == "" {
+		domain = orgToken + ".com"
+	}
+
+	if res.StatusCode == 304 {
+		return &CompanyMeta{
+			Name:       compName,
+			Domain:     domain,
+			CareersURL: fmt.Sprintf("https://jobs.ashbyhq.com/%s", orgToken),
+		}, nil
+	}
+
 	if res.StatusCode != 200 {
 		return nil, fmt.Errorf("ashby API returned status %d for organization %s", res.StatusCode, orgToken)
 	}
@@ -66,10 +79,6 @@ func (a *AshbyAdapter) ExtractByBoardID(ctx context.Context, orgToken, domain st
 		return nil, fmt.Errorf("failed parsing Ashby JSON: %w", err)
 	}
 
-	compName := formatCompanyName(orgToken)
-	if domain == "" {
-		domain = orgToken + ".com"
-	}
 	careersURL := fmt.Sprintf("https://jobs.ashbyhq.com/%s", orgToken)
 	meta := &CompanyMeta{
 		Name:       compName,

@@ -477,21 +477,55 @@ func (c *SheetsClient) SyncJobs(ctx context.Context, store *storage.Store, opts 
 
 // SyncAll synchronizes both Contacts (leads) and Direct Apply Jobs to Google Sheets.
 func (c *SheetsClient) SyncAll(ctx context.Context, store *storage.Store, opts SyncOptions) (*SyncResult, error) {
+	log := opts.LogFunc
+	if log == nil {
+		log = func(string, ...any) {}
+	}
+
 	leadRes, leadErr := c.SyncLeads(ctx, store, opts)
 	if leadErr != nil {
-		return nil, leadErr
+		log("[SYNC] ⚠️ Contacts sync error: %v\n", leadErr)
 	}
 
 	jobRes, jobErr := c.SyncJobs(ctx, store, opts)
 	if jobErr != nil {
-		return nil, jobErr
+		log("[SYNC] ⚠️ Jobs sync error: %v\n", jobErr)
+	}
+
+	totalProc := 0
+	totalSync := 0
+	totalBatches := 0
+	var totalDuration time.Duration
+
+	if leadRes != nil {
+		totalProc += leadRes.TotalProcessed
+		totalSync += leadRes.TotalSynced
+		totalBatches += leadRes.Batches
+		totalDuration += leadRes.Duration
+	}
+	if jobRes != nil {
+		totalProc += jobRes.TotalProcessed
+		totalSync += jobRes.TotalSynced
+		totalBatches += jobRes.Batches
+		totalDuration += jobRes.Duration
 	}
 
 	combined := &SyncResult{
-		TotalProcessed: leadRes.TotalProcessed + jobRes.TotalProcessed,
-		TotalSynced:    leadRes.TotalSynced + jobRes.TotalSynced,
-		Batches:        leadRes.Batches + jobRes.Batches,
-		Duration:       leadRes.Duration + jobRes.Duration,
+		TotalProcessed: totalProc,
+		TotalSynced:    totalSync,
+		Batches:        totalBatches,
+		Duration:       totalDuration,
 	}
+
+	if leadErr != nil && jobErr != nil {
+		return combined, fmt.Errorf("sync failed for both tabs: contacts (%v), jobs (%v)", leadErr, jobErr)
+	}
+	if leadErr != nil {
+		return combined, leadErr
+	}
+	if jobErr != nil {
+		return combined, jobErr
+	}
+
 	return combined, nil
 }

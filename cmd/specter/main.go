@@ -42,6 +42,8 @@ func main() {
 	command := os.Args[1]
 
 	switch command {
+	case "run":
+		runAutonomous(os.Args[2:])
 	case "scan":
 		runScan(os.Args[2:])
 	case "sync":
@@ -67,6 +69,40 @@ func main() {
 		printHelp()
 		os.Exit(1)
 	}
+}
+
+// runAutonomous executes the full scan and automatically synchronizes to Google Sheets.
+func runAutonomous(args []string) {
+	var scanArgs []string
+	hasForce := false
+	hasSync := false
+	hasLimit := false
+
+	for _, a := range args {
+		if strings.HasPrefix(a, "--force") || strings.HasPrefix(a, "-force") {
+			hasForce = true
+		}
+		if strings.HasPrefix(a, "--sync-sheets") {
+			hasSync = true
+		}
+		if strings.HasPrefix(a, "--limit") {
+			hasLimit = true
+		}
+		scanArgs = append(scanArgs, a)
+	}
+
+	if !hasForce {
+		scanArgs = append(scanArgs, "--force")
+	}
+	if !hasSync {
+		scanArgs = append(scanArgs, "--sync-sheets")
+	}
+	if !hasLimit && len(args) == 0 {
+		// Default to running all seeds when invoked simply as `specter run`
+		scanArgs = append(scanArgs, "--all")
+	}
+
+	runScan(scanArgs)
 }
 
 func runScan(args []string) {
@@ -102,10 +138,9 @@ func runScan(args []string) {
 
 	fs.Parse(args)
 
+	// If neither --all nor --target was explicitly passed, default to all seeds
 	if !*all && *target == "" {
-		fmt.Fprintln(os.Stderr, "Error: specify --all to run the curated catalog, or provide --target=<ats_or_domain>")
-		fmt.Fprintln(os.Stderr, "Example: specter scan --all --concurrency 4")
-		os.Exit(1)
+		*all = true
 	}
 
 	// 1. Root context with OS Interrupt (Ctrl+C) handling
@@ -215,6 +250,10 @@ func runScan(args []string) {
 	tracker.Start(150 * time.Millisecond)
 	defer tracker.Stop()
 
+	fetcher.OnRequestDone = func(status int) {
+		tracker.IncRequests(1)
+	}
+
 	fmt.Printf("\n⚡ \033[1;36mSPECTER AUTONOMOUS RECON ENGINE v%s\033[0m\n", version)
 	fmt.Printf("   Run ID:      \033[1;32m%s\033[0m\n", runID)
 	fmt.Printf("   Run Dir:     \033[1m%s\033[0m\n", runDir)
@@ -298,7 +337,9 @@ func runScan(args []string) {
 				if !shouldMine {
 					tracker.Log("♻️  [FRONTIER] GitHub org @%s visited recently.", targetOrg)
 				} else {
-					leads, mineErr := miner.MineOrganization(ctx, targetOrg, seed.Domain, nil)
+					leads, mineErr := miner.MineOrganization(ctx, targetOrg, seed.Domain, func(msg string) {
+						tracker.Log("   [%s] %s", targetOrg, msg)
+					})
 					_ = frontier.MarkVisited(gitKey, "github_org", mineErr)
 
 					if mineErr != nil {
@@ -868,32 +909,22 @@ func runApply(args []string) {
 }
 
 func printHelp() {
-	fmt.Println(`Specter CLI - Autonomous Recon & Engineering Lead Discovery Engine
+	fmt.Println(`⚡ SPECTER - Fast Recon & Global Remote Job Discovery Engine
 
-Usage:
-  specter scan --all [--concurrency=4] [--limit=10] [--ttl=7] [--sync-sheets]
-  specter scan --target=<ats_or_domain> [--github=<org>] [--concurrency=4] [--sync-sheets]
-  specter sync sheets [--webhook=<url>] [--all] [--limit=100] [--dry-run]
-  specter apply [--global-only] [--contractor-only] [--fresh-only] [--domain=<domain>] [--export]
-  specter leads list [--domain=<domain>] [--uncontacted]
-  specter leads contact --id=<id>
-  specter report --domain=<domain> [--out-dir=reports]
-  specter roles [--keyword=<kw>]
-  specter companies
-  specter export [--format=json|csv|roles-csv] [--output=<file>]
+🚀 Quick Start (Zero Flags Needed):
+  ./specter run                     Run full scan & sync everything to Google Sheets
+  ./specter run --limit=5           Quick run on first 5 companies
+  ./specter scan                    Scan all companies for open jobs & technical leads
+  ./specter sync                    Sync mined leads and jobs to Google Sheets
+  ./specter apply --global-only     View one-click remote jobs (worldwide / contractor)
+  ./specter leads list              View discovered technical leads
 
-Examples:
-  specter scan --all --concurrency 4 --sync-sheets
-  specter scan --all --limit 5
-  specter sync sheets --limit 25
-  specter sync sheets --dry-run
-  specter sync sheets --all --webhook="https://script.google.com/macros/s/.../exec"
-  specter apply --global-only
-  specter apply --contractor-only --fresh-only
-  specter scan --target=boards.greenhouse.io/stripe --github=stripe
-  specter report --domain=canonical.com
-  specter leads list --uncontacted
-  specter export --format=roles-csv --output=direct_apply.csv`)
+🛠️ Standard Commands:
+  ./specter scan [--target=<url>] [--github=<org>] [--force] [--sync-sheets]
+  ./specter sync sheets [--target=all|leads|jobs] [--global-only] [--all] [--dry-run]
+  ./specter apply [--global-only] [--fresh-only] [--domain=<domain>] [--export]
+  ./specter leads list [--domain=<domain>] [--uncontacted]
+  ./specter export [--format=json|csv|roles-csv] [--output=<file>]`)
 }
 
 func isInteractiveTerminal() bool {

@@ -65,6 +65,19 @@ func (g *GreenhouseAdapter) ExtractByBoardID(ctx context.Context, boardToken, do
 		return nil, fmt.Errorf("greenhouse API request failed: %w", err)
 	}
 
+	compName := formatCompanyName(boardToken)
+	if domain == "" {
+		domain = boardToken + ".com"
+	}
+
+	if res.StatusCode == 304 {
+		return &CompanyMeta{
+			Name:       compName,
+			Domain:     domain,
+			CareersURL: fmt.Sprintf("https://boards.greenhouse.io/%s", boardToken),
+		}, nil
+	}
+
 	if res.StatusCode != 200 {
 		return nil, fmt.Errorf("greenhouse API returned status %d for token %s", res.StatusCode, boardToken)
 	}
@@ -72,11 +85,6 @@ func (g *GreenhouseAdapter) ExtractByBoardID(ctx context.Context, boardToken, do
 	var payload ghResponse
 	if err := json.Unmarshal(res.Body, &payload); err != nil {
 		return nil, fmt.Errorf("failed parsing greenhouse JSON response: %w", err)
-	}
-
-	compName := formatCompanyName(boardToken)
-	if domain == "" {
-		domain = boardToken + ".com"
 	}
 	careersURL := fmt.Sprintf("https://boards.greenhouse.io/%s", boardToken)
 	meta := &CompanyMeta{

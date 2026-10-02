@@ -80,6 +80,14 @@ func NewTokenRotator(tokensCSV string) *TokenRotator {
 	return &TokenRotator{tokens: tokens}
 }
 
+// Count returns the number of active tokens in the rotator.
+func (r *TokenRotator) Count() int {
+	if r == nil {
+		return 0
+	}
+	return len(r.tokens)
+}
+
 // Next returns the next token in round-robin sequence or empty string if none configured.
 func (r *TokenRotator) Next() string {
 	if r == nil || len(r.tokens) == 0 {
@@ -466,9 +474,13 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 	contributors := make(map[string]*ContributorAggregation)
 
 	// 2. Iterate repositories and inspect recent commits
-	for _, repo := range targetRepos {
+	for idx, repo := range targetRepos {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+
+		if onProgress != nil {
+			onProgress(fmt.Sprintf("Scanning %s/%s (%d/%d)...", org, repo.Name, idx+1, len(targetRepos)))
 		}
 
 		repoFullName := fmt.Sprintf("%s/%s", org, repo.Name)
@@ -661,16 +673,27 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 			MatchedSignals: matchedSignals,
 		}
 
-		// Enrich Lead Profile via public GitHub user API & LinkedIn heuristics
-		m.enrichLeadProfile(ctx, &lead, org)
-
 		leads = append(leads, lead)
 	}
 
-	// Sort leads descending by relevance score
+	// Sort leads descending by relevance score first
 	sort.Slice(leads, func(i, j int) bool {
 		return leads[i].RelevanceScore > leads[j].RelevanceScore
 	})
+
+	// Enrich top leads only (up to 10 per company) to avoid burning API quota and eliminate latency
+	enrichLimit := 10
+	if len(leads) < enrichLimit {
+		enrichLimit = len(leads)
+	}
+	for i := 0; i < enrichLimit; i++ {
+		m.enrichLeadProfile(ctx, &leads[i], org)
+	}
+	for i := enrichLimit; i < len(leads); i++ {
+		if leads[i].LinkedInURL == "" {
+			leads[i].LinkedInURL = generateOSINTLinkedIn(leads[i].Name, org, companyDomain)
+		}
+	}
 
 	return leads, nil
 }
@@ -683,6 +706,18 @@ func (m *GitMiner) enrichLeadProfile(ctx context.Context, lead *EngineeringLead,
 	}
 
 	handle := lead.GitHubHandle
+
+	// If no tokens configured, skip GitHub user profile API calls to preserve unauthenticated rate limits
+	if m.rotator == nil || m.rotator.Count() == 0 {
+		cleanHandle := strings.TrimPrefix(handle, "@")
+		if !strings.ContainsAny(cleanHandle, "._-") && len(cleanHandle) >= 3 && len(cleanHandle) <= 20 {
+			lead.LinkedInURL = "https://www.linkedin.com/in/" + cleanHandle
+		} else {
+			lead.LinkedInURL = generateOSINTLinkedIn(lead.Name, companyName, lead.Domain)
+		}
+		return
+	}
+
 	var profile *ghUserProfile
 	if val, ok := m.profileCache.Load(handle); ok {
 		profile = val.(*ghUserProfile)
