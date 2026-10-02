@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -402,8 +403,24 @@ func runScan(args []string) {
 	_ = runManager.LinkLatestRun(runDir)
 	fmt.Printf("📁 \033[1;34mRun Directory Archive:\033[0m %s (\033[2mlinked at %s/latest\033[0m)\n", runDir, *outDir)
 
-	// Dispatch Google Sheets synchronization if requested
-	if *syncSheets {
+	// Dispatch Google Sheets synchronization if requested or prompted interactively
+	shouldSync := *syncSheets
+	if !shouldSync && isInteractiveTerminal() {
+		unsyncedCount, _ := store.CountUnsyncedEngineeringLeads(context.Background())
+		if unsyncedCount > 0 {
+			fmt.Printf("\n📤 Sync newly discovered leads to Google Sheets now? [Y/n]: ")
+			reader := bufio.NewReader(os.Stdin)
+			input, err := reader.ReadString('\n')
+			if err == nil {
+				trimmed := strings.TrimSpace(strings.ToLower(input))
+				if trimmed == "" || trimmed == "y" || trimmed == "yes" {
+					shouldSync = true
+				}
+			}
+		}
+	}
+
+	if shouldSync {
 		fmt.Println()
 		sheetsClient := sync.NewSheetsClient(*webhookURL)
 		_, _ = sheetsClient.SyncLeads(context.Background(), store, sync.SyncOptions{
@@ -856,5 +873,13 @@ Examples:
   specter report --domain=canonical.com
   specter leads list --uncontacted
   specter export --format=roles-csv --output=direct_apply.csv`)
+}
+
+func isInteractiveTerminal() bool {
+	fileInfo, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }
 

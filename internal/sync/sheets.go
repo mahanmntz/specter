@@ -31,12 +31,16 @@ const (
 
 // SheetLeadPayload matches the JSON schema expected by the Google Apps Script doPost handler.
 type SheetLeadPayload struct {
-	Company string `json:"company"`
-	Name    string `json:"name"`
-	Role    string `json:"role"`
-	Email   string `json:"email"`
-	GitHub  string `json:"github"`
-	Repo    string `json:"repo"`
+	Score      int    `json:"score"`
+	Company    string `json:"company"`
+	Name       string `json:"name"`
+	Role       string `json:"role"`
+	Topic      string `json:"topic"`
+	Email      string `json:"email"`
+	LinkedIn   string `json:"linkedin"`
+	GitHub     string `json:"github"`
+	Repo       string `json:"repo"`
+	Icebreaker string `json:"icebreaker"`
 }
 
 // SheetsClient manages batch synchronization to Google Sheets via Webhook.
@@ -120,13 +124,41 @@ func ConvertLeadToPayload(lead signals.EngineeringLead) SheetLeadPayload {
 		repo = lead.Source
 	}
 
+	// Topic synthesis
+	topic := ""
+	if len(lead.MatchedSignals) > 0 {
+		topic = strings.Join(lead.MatchedSignals, " / ")
+	} else if lead.TopLanguages != "" {
+		topic = lead.TopLanguages
+	} else {
+		topic = "Distributed Systems & Go"
+	}
+
+	// Contextual icebreaker synthesis
+	icebreaker := ""
+	if lead.RepoName != "" {
+		if len(lead.MatchedSignals) > 0 {
+			icebreaker = fmt.Sprintf("Followed your work on %s regarding %s; impressed by your backend contributions.", lead.RepoName, lead.MatchedSignals[0])
+		} else {
+			icebreaker = fmt.Sprintf("Followed your recent contributions to %s; wanted to connect regarding backend architecture and systems design.", lead.RepoName)
+		}
+	} else if lead.Role != "" {
+		icebreaker = fmt.Sprintf("Came across your profile as %s; wanted to connect regarding distributed systems and modern backend tooling.", lead.Role)
+	} else {
+		icebreaker = "Impressed by your engineering contributions; wanted to connect regarding backend systems and distributed architecture."
+	}
+
 	return SheetLeadPayload{
-		Company: company,
-		Name:    lead.Name,
-		Role:    lead.Role,
-		Email:   lead.Email,
-		GitHub:  gh,
-		Repo:    repo,
+		Score:      lead.RelevanceScore,
+		Company:    company,
+		Name:       lead.Name,
+		Role:       lead.Role,
+		Topic:      topic,
+		Email:      lead.Email,
+		LinkedIn:   lead.LinkedInURL,
+		GitHub:     gh,
+		Repo:       repo,
+		Icebreaker: icebreaker,
 	}
 }
 

@@ -358,6 +358,15 @@ func TestSheetsSyncTracking(t *testing.T) {
 	if len(allLeads) != 2 {
 		t.Fatalf("expected 2 leads for all sync, got %d", len(allLeads))
 	}
+
+	// 5. CountUnsyncedEngineeringLeads should return 1
+	count, err := store.CountUnsyncedEngineeringLeads(ctx)
+	if err != nil {
+		t.Fatalf("CountUnsyncedEngineeringLeads failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected count 1, got %d", count)
+	}
 }
 
 

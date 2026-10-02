@@ -42,18 +42,24 @@ func TestResolveWebhookURL(t *testing.T) {
 
 func TestConvertLeadToPayload(t *testing.T) {
 	lead := signals.EngineeringLead{
-		Domain:        "fly.io",
-		CompanyDomain: "fly.io",
-		Name:          "Alice Engineer",
-		Role:          "Distributed Systems Lead",
-		Email:         "alice@fly.io",
-		GitHubHandle:  "aliceeng",
-		RepoName:      "superfly/flyctl",
+		Domain:         "fly.io",
+		CompanyDomain:  "fly.io",
+		Name:           "Alice Engineer",
+		Role:           "Distributed Systems Lead",
+		Email:          "alice@fly.io",
+		GitHubHandle:   "aliceeng",
+		RepoName:       "superfly/flyctl",
+		RelevanceScore: 85,
+		LinkedInURL:    "https://linkedin.com/in/alice",
+		MatchedSignals: []string{"Distributed Systems", "Go"},
 	}
 
 	payload := ConvertLeadToPayload(lead)
 	if payload.Company != "fly.io" {
 		t.Errorf("expected company fly.io, got %s", payload.Company)
+	}
+	if payload.Score != 85 {
+		t.Errorf("expected score 85, got %d", payload.Score)
 	}
 	if payload.GitHub != "@aliceeng" {
 		t.Errorf("expected @aliceeng with @ prefix, got %s", payload.GitHub)
@@ -61,16 +67,29 @@ func TestConvertLeadToPayload(t *testing.T) {
 	if payload.Repo != "superfly/flyctl" {
 		t.Errorf("expected repo superfly/flyctl, got %s", payload.Repo)
 	}
+	if payload.Topic != "Distributed Systems / Go" {
+		t.Errorf("expected topic 'Distributed Systems / Go', got %s", payload.Topic)
+	}
+	if payload.LinkedIn != "https://linkedin.com/in/alice" {
+		t.Errorf("expected linkedin URL, got %s", payload.LinkedIn)
+	}
+	if payload.Icebreaker == "" {
+		t.Errorf("expected non-empty icebreaker")
+	}
 
 	// Lead with already prefixed @
 	lead2 := signals.EngineeringLead{
 		Domain:       "test.com",
 		Name:         "Bob",
 		GitHubHandle: "@bobdev",
+		TopLanguages: "Rust",
 	}
 	payload2 := ConvertLeadToPayload(lead2)
 	if payload2.GitHub != "@bobdev" {
 		t.Errorf("expected single @bobdev, got %s", payload2.GitHub)
+	}
+	if payload2.Topic != "Rust" {
+		t.Errorf("expected topic Rust, got %s", payload2.Topic)
 	}
 }
 

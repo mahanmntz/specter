@@ -121,6 +121,7 @@ func NewStore(dbPath string) (*Store, error) {
 		linkedin_url TEXT DEFAULT '',
 		location TEXT DEFAULT '',
 		matched_signals TEXT DEFAULT '[]',
+		email_verified BOOLEAN DEFAULT 0,
 		synced_to_sheets BOOLEAN DEFAULT 0,
 		synced_at DATETIME,
 		UNIQUE(company_domain, github_handle)
@@ -165,6 +166,7 @@ func NewStore(dbPath string) (*Store, error) {
 		"linkedin_url TEXT DEFAULT ''",
 		"location TEXT DEFAULT ''",
 		"matched_signals TEXT DEFAULT '[]'",
+		"email_verified BOOLEAN DEFAULT 0",
 		"synced_to_sheets BOOLEAN DEFAULT 0",
 		"synced_at DATETIME",
 	}
@@ -364,14 +366,15 @@ func (s *Store) SaveEngineeringLeads(ctx context.Context, leads []signals.Engine
 
 		res, err := s.db.ExecContext(ctx, `
 			INSERT INTO engineering_leads 
-				(domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
+				(domain, company_domain, name, role, email, email_verified, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
 				 repo_name, repo_url, commit_sha, commit_url, bio, website_url, linkedin_url, location, matched_signals)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(company_domain, github_handle) DO UPDATE SET
 				domain = excluded.domain,
 				name = excluded.name,
 				role = excluded.role,
 				email = excluded.email,
+				email_verified = excluded.email_verified,
 				top_languages = excluded.top_languages,
 				relevance_score = MAX(engineering_leads.relevance_score, excluded.relevance_score),
 				discovered_at = excluded.discovered_at,
@@ -384,7 +387,7 @@ func (s *Store) SaveEngineeringLeads(ctx context.Context, leads []signals.Engine
 				linkedin_url = COALESCE(NULLIF(excluded.linkedin_url, ''), engineering_leads.linkedin_url),
 				location = COALESCE(NULLIF(excluded.location, ''), engineering_leads.location),
 				matched_signals = excluded.matched_signals
-		`, compDomain, compDomain, l.Name, l.Role, l.Email, l.Source, ghHandle, l.TopLanguages, l.RelevanceScore, now,
+		`, compDomain, compDomain, l.Name, l.Role, l.Email, l.EmailVerified, l.Source, ghHandle, l.TopLanguages, l.RelevanceScore, now,
 			l.RepoName, l.RepoURL, l.CommitSHA, l.CommitURL, l.Bio, l.WebsiteURL, l.LinkedInURL, l.Location, string(signalsJSON))
 		if err != nil {
 			return newCount, fmt.Errorf("failed saving lead %s: %w", ghHandle, err)
@@ -401,7 +404,7 @@ func (s *Store) SaveEngineeringLeads(ctx context.Context, leads []signals.Engine
 // ListEngineeringLeads retrieves engineering leads for a domain or all domains.
 func (s *Store) ListEngineeringLeads(ctx context.Context, domain string, uncontactedOnly bool) ([]signals.EngineeringLead, error) {
 	query := `
-		SELECT id, domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
+		SELECT id, domain, company_domain, name, role, email, COALESCE(email_verified, 0), source, github_handle, top_languages, relevance_score, discovered_at, contacted,
 		       COALESCE(repo_name, ''), COALESCE(repo_url, ''), COALESCE(commit_sha, ''), COALESCE(commit_url, ''),
 		       COALESCE(bio, ''), COALESCE(website_url, ''), COALESCE(linkedin_url, ''), COALESCE(location, ''),
 		       COALESCE(matched_signals, '[]'),
@@ -430,9 +433,9 @@ func (s *Store) ListEngineeringLeads(ctx context.Context, domain string, unconta
 		var l signals.EngineeringLead
 		var discRaw, syncedAtRaw any
 		var sigsJSON string
-		var synced bool
+		var synced, emailVerified bool
 		if err := rows.Scan(
-			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &l.Source,
+			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &emailVerified, &l.Source,
 			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &discRaw, &l.Contacted,
 			&l.RepoName, &l.RepoURL, &l.CommitSHA, &l.CommitURL,
 			&l.Bio, &l.WebsiteURL, &l.LinkedInURL, &l.Location,
@@ -440,6 +443,7 @@ func (s *Store) ListEngineeringLeads(ctx context.Context, domain string, unconta
 		); err != nil {
 			return nil, err
 		}
+		l.EmailVerified = emailVerified
 		l.DiscoveredAt = parseSQLiteTime(discRaw)
 		l.SyncedToSheets = synced
 		l.SyncedAt = parseSQLiteTime(syncedAtRaw)
@@ -453,7 +457,7 @@ func (s *Store) ListEngineeringLeads(ctx context.Context, domain string, unconta
 // GetUnsyncedEngineeringLeads retrieves engineering leads that have not yet been synchronized to Google Sheets.
 func (s *Store) GetUnsyncedEngineeringLeads(ctx context.Context, limit int) ([]signals.EngineeringLead, error) {
 	query := `
-		SELECT id, domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
+		SELECT id, domain, company_domain, name, role, email, COALESCE(email_verified, 0), source, github_handle, top_languages, relevance_score, discovered_at, contacted,
 		       COALESCE(repo_name, ''), COALESCE(repo_url, ''), COALESCE(commit_sha, ''), COALESCE(commit_url, ''),
 		       COALESCE(bio, ''), COALESCE(website_url, ''), COALESCE(linkedin_url, ''), COALESCE(location, ''),
 		       COALESCE(matched_signals, '[]'),
@@ -479,9 +483,9 @@ func (s *Store) GetUnsyncedEngineeringLeads(ctx context.Context, limit int) ([]s
 		var l signals.EngineeringLead
 		var discRaw, syncedAtRaw any
 		var sigsJSON string
-		var synced bool
+		var synced, emailVerified bool
 		if err := rows.Scan(
-			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &l.Source,
+			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &emailVerified, &l.Source,
 			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &discRaw, &l.Contacted,
 			&l.RepoName, &l.RepoURL, &l.CommitSHA, &l.CommitURL,
 			&l.Bio, &l.WebsiteURL, &l.LinkedInURL, &l.Location,
@@ -489,6 +493,7 @@ func (s *Store) GetUnsyncedEngineeringLeads(ctx context.Context, limit int) ([]s
 		); err != nil {
 			return nil, err
 		}
+		l.EmailVerified = emailVerified
 		l.DiscoveredAt = parseSQLiteTime(discRaw)
 		l.SyncedToSheets = synced
 		l.SyncedAt = parseSQLiteTime(syncedAtRaw)
@@ -507,7 +512,7 @@ func (s *Store) GetUnsyncedLeads(limit int) ([]signals.EngineeringLead, error) {
 // GetAllEngineeringLeadsForSync retrieves all engineering leads regardless of previous sync status.
 func (s *Store) GetAllEngineeringLeadsForSync(ctx context.Context, limit int) ([]signals.EngineeringLead, error) {
 	query := `
-		SELECT id, domain, company_domain, name, role, email, source, github_handle, top_languages, relevance_score, discovered_at, contacted,
+		SELECT id, domain, company_domain, name, role, email, COALESCE(email_verified, 0), source, github_handle, top_languages, relevance_score, discovered_at, contacted,
 		       COALESCE(repo_name, ''), COALESCE(repo_url, ''), COALESCE(commit_sha, ''), COALESCE(commit_url, ''),
 		       COALESCE(bio, ''), COALESCE(website_url, ''), COALESCE(linkedin_url, ''), COALESCE(location, ''),
 		       COALESCE(matched_signals, '[]'),
@@ -532,9 +537,9 @@ func (s *Store) GetAllEngineeringLeadsForSync(ctx context.Context, limit int) ([
 		var l signals.EngineeringLead
 		var discRaw, syncedAtRaw any
 		var sigsJSON string
-		var synced bool
+		var synced, emailVerified bool
 		if err := rows.Scan(
-			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &l.Source,
+			&l.ID, &l.Domain, &l.CompanyDomain, &l.Name, &l.Role, &l.Email, &emailVerified, &l.Source,
 			&l.GitHubHandle, &l.TopLanguages, &l.RelevanceScore, &discRaw, &l.Contacted,
 			&l.RepoName, &l.RepoURL, &l.CommitSHA, &l.CommitURL,
 			&l.Bio, &l.WebsiteURL, &l.LinkedInURL, &l.Location,
@@ -542,6 +547,7 @@ func (s *Store) GetAllEngineeringLeadsForSync(ctx context.Context, limit int) ([
 		); err != nil {
 			return nil, err
 		}
+		l.EmailVerified = emailVerified
 		l.DiscoveredAt = parseSQLiteTime(discRaw)
 		l.SyncedToSheets = synced
 		l.SyncedAt = parseSQLiteTime(syncedAtRaw)
@@ -550,6 +556,13 @@ func (s *Store) GetAllEngineeringLeadsForSync(ctx context.Context, limit int) ([
 	}
 
 	return leads, nil
+}
+
+// CountUnsyncedEngineeringLeads returns the number of leads waiting to be synchronized to Google Sheets.
+func (s *Store) CountUnsyncedEngineeringLeads(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM engineering_leads WHERE (synced_to_sheets = 0 OR synced_to_sheets IS NULL)").Scan(&count)
+	return count, err
 }
 
 // MarkLeadsSynced marks a list of engineering lead IDs as synced to Google Sheets.

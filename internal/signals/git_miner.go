@@ -24,6 +24,7 @@ type EngineeringLead struct {
 	Name           string    `json:"name"`
 	Role           string    `json:"role"`
 	Email          string    `json:"email"`
+	EmailVerified  bool      `json:"email_verified"`
 	Source         string    `json:"source"`
 	GitHubHandle   string    `json:"github_handle"`
 	TopLanguages   string    `json:"top_languages"`
@@ -590,6 +591,15 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 			}
 		}
 
+		// DNS MX email domain verification
+		emailVerified := VerifyEmailDomainContext(ctx, agg.Email)
+		if !emailVerified {
+			score -= 30
+			if score < 0 {
+				score = 0
+			}
+		}
+
 		topLangs := formatTopLanguages(agg.Languages)
 
 		lead := EngineeringLead{
@@ -598,6 +608,7 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 			Name:           agg.Name,
 			Role:           role,
 			Email:          agg.Email,
+			EmailVerified:  emailVerified,
 			Source:         "git_commit",
 			GitHubHandle:   agg.GitHubHandle,
 			TopLanguages:   topLangs,

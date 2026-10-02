@@ -21,3 +21,7 @@ test_sources_out/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Dynamic run archives
+reports/runs/
+reports/latest
