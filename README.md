@@ -271,7 +271,24 @@ Query active roles with direct deep-application links:
 ./specter apply --domain=canonical.com --export
 ```
 
-### 3. Targeted Single Scan
+### 3. Google Sheets Autonomous Synchronization (`specter sync sheets`)
+Push mined engineering leads directly into Google Sheets via Google Apps Script Webhook:
+
+```bash
+# Synchronize unsynced leads (up to 100)
+./specter sync sheets
+
+# Dry-run inspection without sending network requests
+./specter sync sheets --dry-run --limit 10
+
+# Re-synchronize all leads with custom webhook override
+./specter sync sheets --all --webhook="https://script.google.com/macros/s/.../exec"
+
+# Run autonomous scan with automatic post-scan Google Sheets sync
+./specter scan --all --concurrency 4 --sync-sheets
+```
+
+### 4. Targeted Single Scan
 Scan a specific company ATS board and GitHub organization:
 ```bash
 # Greenhouse board with GitHub miner
