@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"specter/internal/ats"
+	"specter/internal/config"
 	"specter/internal/crawler"
 	"specter/internal/exporter"
 	"specter/internal/reporter"
@@ -29,6 +31,9 @@ import (
 const version = "1.3.0"
 
 func main() {
+	// Auto-load .env configuration file if present
+	_ = config.LoadDotEnv()
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(0)
@@ -65,20 +70,34 @@ func main() {
 }
 
 func runScan(args []string) {
+	defaultConcurrency := 4
+	if envC := os.Getenv("SPECTER_CONCURRENCY"); envC != "" {
+		if c, err := strconv.Atoi(envC); err == nil && c > 0 {
+			defaultConcurrency = c
+		}
+	}
+	defaultTTL := 3
+	if envTTL := os.Getenv("SPECTER_CRAWL_TTL_DAYS"); envTTL != "" {
+		if t, err := strconv.Atoi(envTTL); err == nil && t > 0 {
+			defaultTTL = t
+		}
+	}
+
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	all := fs.Bool("all", false, "Scan all targets from curated seed catalog")
 	seedsPath := fs.String("seeds", "", "Path to custom seeds JSON file (defaults to embedded seeds)")
 	limit := fs.Int("limit", 0, "Limit number of seed targets to process (0 = all)")
-	concurrency := fs.Int("concurrency", 4, "Number of concurrent worker goroutines")
+	concurrency := fs.Int("concurrency", defaultConcurrency, "Number of concurrent worker goroutines")
 	target := fs.String("target", "", "Target ATS URL, board token, or company domain (e.g. boards.greenhouse.io/stripe)")
 	githubOrg := fs.String("github", "", "GitHub organization name to mine contributor leads (e.g. stripe)")
 	tokensFlag := fs.String("tokens", "", "Comma-separated GitHub tokens for round-robin rotation (or GITHUB_TOKENS env)")
 	roleFilter := fs.String("role", "backend", "Target role focus (default: backend)")
 	dbPath := fs.String("db", "specter.db", "SQLite database path")
 	outDir := fs.String("out-dir", "reports", "Directory to write Markdown reports")
-	ttlDays := fs.Int("ttl", 7, "Frontier deduplication TTL in days (re-crawl if older)")
+	ttlDays := fs.Int("ttl", defaultTTL, "Frontier deduplication TTL in days (re-crawl if older)")
 	timeoutSec := fs.Int("timeout", 15, "HTTP request timeout in seconds")
-	syncSheets := fs.Bool("sync-sheets", false, "Automatically sync newly discovered leads to Google Sheets upon completion")
+	forceRefresh := fs.Bool("force", false, "Force refresh and bypass crawler frontier deduplication cache")
+	syncSheets := fs.Bool("sync-sheets", false, "Automatically sync newly discovered leads & jobs to Google Sheets upon completion")
 	webhookURL := fs.String("webhook", "", "Custom Google Sheets webhook URL override")
 
 	fs.Parse(args)
@@ -132,11 +151,12 @@ func runScan(args []string) {
 
 	registry := ats.NewRegistry(fetcher)
 	crawlTTL := time.Duration(*ttlDays) * 24 * time.Hour
+	if *forceRefresh || *target != "" {
+		crawlTTL = 0
+	}
 
 	miner := signals.NewGitMiner(fetcher, signals.GitMinerOptions{
 		GitHubTokens:   ghTokens,
-		MaxRepos:       15,
-		MaxCommitsRepo: 25,
 		ExtractPatches: true,
 	})
 
@@ -406,9 +426,10 @@ func runScan(args []string) {
 	// Dispatch Google Sheets synchronization if requested or prompted interactively
 	shouldSync := *syncSheets
 	if !shouldSync && isInteractiveTerminal() {
-		unsyncedCount, _ := store.CountUnsyncedEngineeringLeads(context.Background())
-		if unsyncedCount > 0 {
-			fmt.Printf("\n📤 Sync newly discovered leads to Google Sheets now? [Y/n]: ")
+		unsyncedLeads, _ := store.CountUnsyncedEngineeringLeads(context.Background())
+		unsyncedJobs := len(freshRoles)
+		if unsyncedLeads > 0 || unsyncedJobs > 0 {
+			fmt.Printf("\n📤 Sync discovered contacts (%d) & jobs (%d) to Google Sheets now? [Y/n]: ", unsyncedLeads, unsyncedJobs)
 			reader := bufio.NewReader(os.Stdin)
 			input, err := reader.ReadString('\n')
 			if err == nil {
@@ -423,8 +444,8 @@ func runScan(args []string) {
 	if shouldSync {
 		fmt.Println()
 		sheetsClient := sync.NewSheetsClient(*webhookURL)
-		_, _ = sheetsClient.SyncLeads(context.Background(), store, sync.SyncOptions{
-			Limit: 200,
+		_, _ = sheetsClient.SyncAll(context.Background(), store, sync.SyncOptions{
+			Limit: 250,
 			LogFunc: func(format string, a ...any) {
 				fmt.Printf(format, a...)
 			},

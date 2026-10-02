@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"specter/internal/ats"
 	"specter/internal/signals"
 	"specter/internal/storage"
 )
@@ -19,17 +20,17 @@ const (
 	// DefaultSheetsWebhook is the production Google Apps Script deployment URL.
 	DefaultSheetsWebhook = "https://script.google.com/macros/s/AKfycbweFX6XX3ugq_ZESSFQ_YHvDTe2KRGccKYwxh-Q03jKZV5trK5brh8rW7sguKff5mrR/exec"
 
-	// DefaultBatchSize is the maximum number of leads dispatched per HTTP POST.
+	// DefaultBatchSize is the maximum number of leads or jobs dispatched per HTTP POST.
 	DefaultBatchSize = 35
 
 	// DefaultRequestTimeout is the HTTP timeout per request.
-	DefaultRequestTimeout = 20 * time.Second
+	DefaultRequestTimeout = 25 * time.Second
 
 	// MaxRetries specifies maximum retry attempts on transient network or 5xx failures.
 	MaxRetries = 2
 )
 
-// SheetLeadPayload matches the JSON schema expected by the Google Apps Script doPost handler.
+// SheetLeadPayload matches the JSON schema expected by the Google Apps Script doPost handler for Contacts tab.
 type SheetLeadPayload struct {
 	Score      int    `json:"score"`
 	Company    string `json:"company"`
@@ -43,6 +44,20 @@ type SheetLeadPayload struct {
 	Icebreaker string `json:"icebreaker"`
 }
 
+// SheetJobPayload matches the JSON schema expected by the Google Apps Script doPost handler for Jobs tab.
+type SheetJobPayload struct {
+	Company            string `json:"company"`
+	Title              string `json:"title"`
+	Location           string `json:"location"`
+	WorkplaceType      string `json:"workplace_type"`
+	RemotePolicy       string `json:"remote_policy"`
+	GlobalRemote       bool   `json:"global_remote"`
+	ContractorFriendly bool   `json:"contractor_friendly"`
+	Compensation       string `json:"compensation"`
+	ApplyURL           string `json:"apply_url"`
+	DiscoveredAt       string `json:"discovered_at"`
+}
+
 // SheetsClient manages batch synchronization to Google Sheets via Webhook.
 type SheetsClient struct {
 	WebhookURL string
@@ -54,9 +69,11 @@ type SheetsClient struct {
 // SyncOptions configures a synchronization run.
 type SyncOptions struct {
 	WebhookURL string
-	All        bool
+	Target     string // "leads", "jobs", "all" (default: "all")
+	All        bool   // Push all records regardless of previously synced status
 	Limit      int
 	DryRun     bool
+	GlobalOnly bool   // For jobs: only sync global/contractor-friendly roles
 	LogFunc    func(format string, args ...any)
 }
 
@@ -162,17 +179,85 @@ func ConvertLeadToPayload(lead signals.EngineeringLead) SheetLeadPayload {
 	}
 }
 
-// PostBatch dispatches a single batch of payloads to the Webhook endpoint with retries.
+// ConvertJobToPayload maps an ats.JobPosting domain model to the SheetJobPayload contract.
+func ConvertJobToPayload(job ats.JobPosting) SheetJobPayload {
+	comp := job.CompanyName
+	if comp == "" {
+		comp = job.CompanyDomain
+	}
+	applyURL := job.ApplyURL
+	if applyURL == "" {
+		applyURL = job.URL
+	}
+	disc := job.FirstSeenAt.Format("2006-01-02")
+	if job.FirstSeenAt.IsZero() {
+		disc = time.Now().Format("2006-01-02")
+	}
+
+	loc := job.Location
+	if loc == "" {
+		loc = "Remote"
+	}
+
+	workplace := job.WorkplaceType
+	if workplace == "" {
+		if job.GlobalRemote {
+			workplace = "Remote (Global)"
+		} else {
+			workplace = "Remote"
+		}
+	}
+
+	return SheetJobPayload{
+		Company:            comp,
+		Title:              job.Title,
+		Location:           loc,
+		WorkplaceType:      workplace,
+		RemotePolicy:       job.RemotePolicy,
+		GlobalRemote:       job.GlobalRemote,
+		ContractorFriendly: job.ContractorFriendly,
+		Compensation:       job.Compensation,
+		ApplyURL:           applyURL,
+		DiscoveredAt:       disc,
+	}
+}
+
+// PostBatch dispatches a single batch of lead payloads to the Webhook endpoint with retries.
 func (c *SheetsClient) PostBatch(ctx context.Context, payloads []SheetLeadPayload) error {
 	if len(payloads) == 0 {
 		return nil
 	}
-
 	bodyBytes, err := json.Marshal(payloads)
 	if err != nil {
 		return fmt.Errorf("failed marshaling leads batch: %w", err)
 	}
+	return c.postRaw(ctx, bodyBytes)
+}
 
+// PostJobsBatch dispatches a single batch of job payloads to the Webhook endpoint with retries.
+func (c *SheetsClient) PostJobsBatch(ctx context.Context, payloads []SheetJobPayload) error {
+	if len(payloads) == 0 {
+		return nil
+	}
+	envelope := struct {
+		Type   string            `json:"type"`
+		Target string            `json:"target"`
+		Jobs   []SheetJobPayload `json:"jobs"`
+		Data   []SheetJobPayload `json:"data"`
+	}{
+		Type:   "jobs",
+		Target: "jobs",
+		Jobs:   payloads,
+		Data:   payloads,
+	}
+	bodyBytes, err := json.Marshal(envelope)
+	if err != nil {
+		return fmt.Errorf("failed marshaling jobs batch: %w", err)
+	}
+	return c.postRaw(ctx, bodyBytes)
+}
+
+func (c *SheetsClient) postRaw(ctx context.Context, bodyBytes []byte) error {
 	var lastErr error
 	delay := c.RetryDelay
 	if delay <= 0 {
@@ -193,7 +278,7 @@ func (c *SheetsClient) PostBatch(ctx context.Context, payloads []SheetLeadPayloa
 			return fmt.Errorf("failed building request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("User-Agent", "Specter-Sync-Client/1.0")
+		req.Header.Set("User-Agent", "Specter-Sync-Client/2.0")
 
 		resp, err := c.HTTPClient.Do(req)
 		if err != nil {
@@ -205,17 +290,14 @@ func (c *SheetsClient) PostBatch(ctx context.Context, payloads []SheetLeadPayloa
 		_ = resp.Body.Close()
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			// Apps script redirection endpoint returned 200
 			return nil
 		}
 
-		// If redirect 302 occurred without automatic following
 		if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusMovedPermanently {
 			return nil
 		}
 
 		lastErr = fmt.Errorf("webhook responded with HTTP %d: %s", resp.StatusCode, string(respBody))
-		// Non-retryable client errors (4xx)
 		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
 			return lastErr
 		}
@@ -271,13 +353,13 @@ func (c *SheetsClient) SyncLeads(ctx context.Context, store *storage.Store, opts
 			allPayloads = append(allPayloads, ConvertLeadToPayload(l))
 		}
 		data, _ := json.MarshalIndent(allPayloads, "", "  ")
-		log("[SYNC] (Dry-Run) Prepared %d leads across %d batch(es) for %s:\n%s\n",
+		log("[SYNC] (Dry-Run: Contacts) Prepared %d leads across %d batch(es) for %s:\n%s\n",
 			len(leads), numBatches, c.WebhookURL, string(data))
 		result.Duration = time.Since(start)
 		return result, nil
 	}
 
-	log("[SYNC] Pushing %d leads to Google Sheets in %d batch(es)...\n", len(leads), numBatches)
+	log("[SYNC] Pushing %d leads to Google Sheets ('Contacts' tab) in %d batch(es)...\n", len(leads), numBatches)
 
 	for i := 0; i < len(leads); i += batchSize {
 		end := i + batchSize
@@ -307,6 +389,109 @@ func (c *SheetsClient) SyncLeads(ctx context.Context, store *storage.Store, opts
 	}
 
 	result.Duration = time.Since(start)
-	log("[SYNC] ✓ Successfully synced %d leads to Google Sheets in %v.\n", result.TotalSynced, result.Duration.Round(time.Millisecond))
+	log("[SYNC] ✓ Successfully synced %d leads to 'Contacts' in %v.\n", result.TotalSynced, result.Duration.Round(time.Millisecond))
 	return result, nil
+}
+
+// SyncJobs extracts open job postings from SQLite and synchronizes them to the "Jobs" tab in Google Sheets.
+func (c *SheetsClient) SyncJobs(ctx context.Context, store *storage.Store, opts SyncOptions) (*SyncResult, error) {
+	start := time.Now()
+	log := opts.LogFunc
+	if log == nil {
+		log = func(string, ...any) {}
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 100
+	}
+
+	filter := storage.DirectApplyFilter{
+		GlobalOnly:     opts.GlobalOnly,
+		ContractorOnly: opts.GlobalOnly,
+	}
+
+	roles, err := store.ListDirectApplyRoles(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed retrieving jobs for sync: %w", err)
+	}
+	if limit > 0 && len(roles) > limit {
+		roles = roles[:limit]
+	}
+
+	result := &SyncResult{
+		TotalProcessed: len(roles),
+	}
+
+	if len(roles) == 0 {
+		return result, nil
+	}
+
+	batchSize := c.BatchSize
+	if batchSize <= 0 {
+		batchSize = DefaultBatchSize
+	}
+
+	numBatches := (len(roles) + batchSize - 1) / batchSize
+	result.Batches = numBatches
+
+	if opts.DryRun {
+		var allPayloads []SheetJobPayload
+		for _, r := range roles {
+			allPayloads = append(allPayloads, ConvertJobToPayload(r))
+		}
+		data, _ := json.MarshalIndent(allPayloads, "", "  ")
+		log("[SYNC] (Dry-Run: Jobs) Prepared %d open roles across %d batch(es) for %s:\n%s\n",
+			len(roles), numBatches, c.WebhookURL, string(data))
+		result.Duration = time.Since(start)
+		return result, nil
+	}
+
+	log("[SYNC] Pushing %d jobs to Google Sheets ('Jobs' tab) in %d batch(es)...\n", len(roles), numBatches)
+
+	for i := 0; i < len(roles); i += batchSize {
+		end := i + batchSize
+		if end > len(roles) {
+			end = len(roles)
+		}
+
+		batchRoles := roles[i:end]
+		payloads := make([]SheetJobPayload, len(batchRoles))
+
+		for j, r := range batchRoles {
+			payloads[j] = ConvertJobToPayload(r)
+		}
+
+		batchIndex := (i / batchSize) + 1
+		if err := c.PostJobsBatch(ctx, payloads); err != nil {
+			return result, fmt.Errorf("jobs batch %d/%d failed: %w", batchIndex, numBatches, err)
+		}
+
+		result.TotalSynced += len(batchRoles)
+	}
+
+	result.Duration = time.Since(start)
+	log("[SYNC] ✓ Successfully synced %d jobs to 'Jobs' in %v.\n", result.TotalSynced, result.Duration.Round(time.Millisecond))
+	return result, nil
+}
+
+// SyncAll synchronizes both Contacts (leads) and Direct Apply Jobs to Google Sheets.
+func (c *SheetsClient) SyncAll(ctx context.Context, store *storage.Store, opts SyncOptions) (*SyncResult, error) {
+	leadRes, leadErr := c.SyncLeads(ctx, store, opts)
+	if leadErr != nil {
+		return nil, leadErr
+	}
+
+	jobRes, jobErr := c.SyncJobs(ctx, store, opts)
+	if jobErr != nil {
+		return nil, jobErr
+	}
+
+	combined := &SyncResult{
+		TotalProcessed: leadRes.TotalProcessed + jobRes.TotalProcessed,
+		TotalSynced:    leadRes.TotalSynced + jobRes.TotalSynced,
+		Batches:        leadRes.Batches + jobRes.Batches,
+		Duration:       leadRes.Duration + jobRes.Duration,
+	}
+	return combined, nil
 }

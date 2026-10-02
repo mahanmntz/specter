@@ -189,7 +189,8 @@ Pre-configured with leading infrastructure, database, and devtools companies kno
 specter/
 ├── cmd/
 │   └── specter/
-│       └── main.go                 # CLI entry point (scan, apply, leads, report, roles, companies, export)
+│       ├── main.go                 # CLI entry point (scan, apply, leads, report, roles, companies, export)
+│       └── sync.go                 # Google Sheets synchronization commands
 ├── configs/
 │   └── seeds.json                 # Pre-populated catalog of 75+ curated tech companies
 ├── internal/
@@ -200,6 +201,8 @@ specter/
 │   │   ├── lever.go               # Lever public postings API adapter (/apply deep-linking)
 │   │   ├── models.go              # ATS domain models, JobPosting & CompanyMeta
 │   │   └── registry.go            # Adapter resolution and dispatch engine
+│   ├── config/
+│   │   └── env.go                 # Zero-dependency .env parser and environment loader
 │   ├── crawler/
 │   │   ├── fetcher.go             # Resilient HTTP client (SSRF guard, conn pool, ETag injection)
 │   │   ├── frontier.go            # Persistent crawl frontier, SQLite TTL cache, conditional headers
@@ -219,18 +222,67 @@ specter/
 │   ├── signals/
 │   │   ├── git_miner.go           # Public Git miner, email harvester, patch parser, bot gate
 │   │   ├── matcher.go             # Backend keyword and technology matcher
-│   │   └── remote_policy.go       # Remote policy, sanction resilience, and quick pitch generator
+│   │   ├── remote_policy.go       # Remote policy, sanction resilience, and quick pitch generator
+│   │   └── verifier.go            # Fast in-memory DNS MX domain email verification cache
 │   ├── storage/
 │   │   └── store.go               # Pure Go SQLite store (modernc.org/sqlite) & schema migrations
+│   ├── sync/
+│   │   └── sheets.go              # Google Sheets two-tab sync engine with retries and chunking
 │   └── ui/
 │       └── progress.go            # Real-time ANSI terminal progress tracker
 ├── reports/                       # Generated dossiers, direct apply dashboards, and run archives
 │   ├── latest -> runs/...         # Symlink to the most recent crawl run
 │   └── runs/                      # Historical date-stamped execution archives
+├── scripts/
+│   └── google_apps_script.js      # Production Google Apps Script webhook handler (Contacts & Jobs)
+├── .env.example                   # Environment configuration template
 ├── go.mod
 ├── go.sum
 └── README.md
 ```
+
+---
+
+## Environment Configuration (`.env`)
+
+Specter features a pure Go, zero-dependency `.env` configuration loader. Copy the example template to get started:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` to configure your environment variables:
+
+| Variable | Description | Default / Example |
+| :--- | :--- | :--- |
+| `GITHUB_TOKENS` | Comma-separated list of GitHub Personal Access Tokens for rate-limit rotation. | `ghp_token1,ghp_token2` |
+| `SPECTER_SHEETS_WEBHOOK` | Target Google Apps Script Webhook URL for two-tab synchronization. | `https://script.google.com/macros/s/.../exec` |
+| `SPECTER_CONCURRENCY` | Default concurrency level for crawl workers. | `4` |
+| `SPECTER_PACER_DELAY_MS` | Base pacing delay in milliseconds between requests per host. | `800` |
+| `SPECTER_MAX_REPOS` | Maximum repositories to mine per organization. | `15` |
+| `SPECTER_MAX_COMMITS` | Maximum commits to analyze per repository. | `30` |
+
+---
+
+## Google Sheets Two-Tab Synchronization Setup
+
+Specter can stream discovered technical contacts and direct-apply job postings directly into a single Google Sheet organized into two synchronized tabs:
+- **Tab 1: Contacts** (Technical Leads, Staff/Principal Engineers, Core Contributors, verified emails, LinkedIn profiles, and personalized outreach icebreakers).
+- **Tab 2: Jobs** (Active open backend & remote roles, contractor-friendly flags, compensation, and deep one-click apply links).
+
+### Setup in 60 Seconds:
+1. Open or create a Google Sheet at [sheets.google.com](https://sheets.google.com).
+2. Go to **Extensions** → **Apps Script**.
+3. Replace all default code in `Code.gs` with the complete script from [`scripts/google_apps_script.js`](file:///Users/mahan/development/backend-pr/specter/scripts/google_apps_script.js).
+4. Click **Deploy** → **New Deployment**.
+5. Select type: **Web app**.
+   - **Execute as**: *Me*
+   - **Who has access**: *Anyone*
+6. Click **Deploy**, authorize access, and copy the **Web app URL**.
+7. Paste this URL into your `.env` file:
+   ```env
+   SPECTER_SHEETS_WEBHOOK="https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+   ```
 
 ---
 
@@ -249,16 +301,49 @@ go build -o specter ./cmd/specter
 ## CLI Usage Guide
 
 ### 1. Autonomous Run Across Seed Catalog
-Launch an autonomous discovery run across the curated catalog of 75+ targets:
+Launch an autonomous discovery run across the curated catalog of 75+ targets. Use `--force` to bypass the 7-day frontier cache and mine fresh data from all organizations:
 ```bash
-./specter scan --all --concurrency=4 --limit=15 --ttl=7
+# Autonomous scan across all seeds with 4 concurrent workers
+./specter scan --all --concurrency=4 --limit=15
+
+# Force fresh crawl across all companies (bypassing 7-day frontier cache)
+./specter scan --all --concurrency=4 --force
+
+# Autonomous scan with automatic post-scan Google Sheets sync
+./specter scan --all --concurrency=4 --sync-sheets
 ```
 Output:
 - Saves all dossiers, direct-apply dashboards, and delta summaries to `reports/runs/YYYY-MM-DD_HH-MM-SS/`.
 - Updates `reports/latest` symlink.
 
-### 2. Direct One-Click Apply Board (`specter apply`)
-Query active roles with direct deep-application links:
+### 2. Google Sheets Autonomous Synchronization (`specter sync sheets`)
+Push mined leads and active roles into your Google Sheet:
+
+```bash
+# Synchronize both Contacts and Jobs tabs (default: --target=all)
+./specter sync sheets
+
+# Synchronize only Contacts (Engineering Leads)
+./specter sync sheets --target=leads
+
+# Synchronize only Jobs (Direct One-Click Apply Roles)
+./specter sync sheets --target=jobs
+
+# Synchronize only worldwide & contractor-friendly (sanction-resilient) jobs
+./specter sync sheets --target=jobs --global-only
+
+# Dry-run inspection without sending network requests
+./specter sync sheets --dry-run --target=all --limit=5
+
+# Re-synchronize all records regardless of previous sync status
+./specter sync sheets --all --target=all
+
+# Override webhook URL on the command line
+./specter sync sheets --webhook="https://script.google.com/macros/s/.../exec"
+```
+
+### 3. Direct One-Click Apply Board (`specter apply`)
+Query active roles with direct deep-application links directly in your terminal:
 
 ```bash
 # List all worldwide & contractor-friendly roles (sanction-resilient)
@@ -268,40 +353,23 @@ Query active roles with direct deep-application links:
 ./specter apply --global-only --fresh-only
 
 # Filter by company domain and generate a markdown dashboard
-./specter apply --domain=canonical.com --export
-```
-
-### 3. Google Sheets Autonomous Synchronization (`specter sync sheets`)
-Push mined engineering leads directly into Google Sheets via Google Apps Script Webhook:
-
-```bash
-# Synchronize unsynced leads (up to 100)
-./specter sync sheets
-
-# Dry-run inspection without sending network requests
-./specter sync sheets --dry-run --limit 10
-
-# Re-synchronize all leads with custom webhook override
-./specter sync sheets --all --webhook="https://script.google.com/macros/s/.../exec"
-
-# Run autonomous scan with automatic post-scan Google Sheets sync
-./specter scan --all --concurrency 4 --sync-sheets
+./specter apply --domain=railway.app --export
 ```
 
 ### 4. Targeted Single Scan
 Scan a specific company ATS board and GitHub organization:
 ```bash
-# Greenhouse board with GitHub miner
-./specter scan --target=boards.greenhouse.io/canonical --github=canonical --ttl=0
+# Greenhouse board with GitHub miner (auto-bypasses frontier cache)
+./specter scan --target=boards.greenhouse.io/canonical --github=canonical
 
 # Lever board
-./specter scan --target=jobs.lever.co/posthog
+./specter scan --target=jobs.lever.co/posthog --github=posthog
 
 # Ashby board
-./specter scan --target=jobs.ashbyhq.com/livekit
+./specter scan --target=jobs.ashbyhq.com/railway --github=railwayapp
 ```
 
-### 4. Discovered Leads Management
+### 5. Discovered Leads Management
 List all verified engineering leads sorted by synergy score:
 ```bash
 ./specter leads list --uncontacted
@@ -317,7 +385,7 @@ Mark lead as contacted:
 ./specter leads contact --id=42
 ```
 
-### 5. Export Datasets
+### 6. Export Datasets
 Export all records to JSON or CSV:
 ```bash
 # Export direct apply roles to CSV

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"specter/internal/ats"
 	"specter/internal/signals"
 	"specter/internal/storage"
 )
@@ -296,5 +297,127 @@ func TestSyncLeads_DryRun(t *testing.T) {
 	unsynced, err := store.GetUnsyncedLeads(10)
 	if err != nil || len(unsynced) != 1 {
 		t.Errorf("expected lead to remain unsynced in dry run")
+	}
+}
+
+func TestConvertJobToPayload(t *testing.T) {
+	now := time.Now().UTC()
+	role := ats.JobPosting{
+		ID:                 "role-123",
+		CompanyDomain:      "railway.app",
+		CompanyName:        "Railway",
+		Title:              "Senior Backend Engineer - Infra",
+		Location:           "Remote - Worldwide",
+		WorkplaceType:      "remote",
+		RemotePolicy:       "Anywhere in the world",
+		GlobalRemote:       true,
+		ContractorFriendly: true,
+		Compensation:       "$160,000 - $210,000",
+		ApplyURL:           "https://railway.app/careers/senior-backend-engineer",
+		FirstSeenAt:        now,
+	}
+
+	payload := ConvertJobToPayload(role)
+	if payload.Company != "Railway" {
+		t.Errorf("expected company Railway, got %s", payload.Company)
+	}
+	if payload.Title != "Senior Backend Engineer - Infra" {
+		t.Errorf("expected title Senior Backend Engineer - Infra, got %s", payload.Title)
+	}
+	if !payload.GlobalRemote {
+		t.Errorf("expected GlobalRemote=true")
+	}
+	if !payload.ContractorFriendly {
+		t.Errorf("expected ContractorFriendly=true")
+	}
+	if payload.ApplyURL != "https://railway.app/careers/senior-backend-engineer" {
+		t.Errorf("expected ApplyURL, got %s", payload.ApplyURL)
+	}
+}
+
+func TestSyncJobs_EndToEnd(t *testing.T) {
+	tempDB := filepath.Join(t.TempDir(), "specter_jobs_sync_test.db")
+	store, err := storage.NewStore(tempDB)
+	if err != nil {
+		t.Fatalf("failed initializing store: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Seed 2 job roles via SaveCompanyAndRoles
+	meta := &ats.CompanyMeta{
+		Domain: "supabase.com",
+		Name:   "Supabase",
+		OpenRoles: []ats.JobPosting{
+			{
+				ID:                 "role-1",
+				CompanyDomain:      "supabase.com",
+				CompanyName:        "Supabase",
+				Title:              "Backend Engineer (Database)",
+				Location:           "Remote",
+				WorkplaceType:      "remote",
+				GlobalRemote:       true,
+				ContractorFriendly: true,
+				ApplyURL:           "https://boards.greenhouse.io/supabase/jobs/123",
+				Keywords:           []string{"backend", "database"},
+				FirstSeenAt:        time.Now().UTC(),
+			},
+			{
+				ID:                 "role-2",
+				CompanyDomain:      "supabase.com",
+				CompanyName:        "Supabase",
+				Title:              "Infrastructure Engineer",
+				Location:           "Remote",
+				WorkplaceType:      "remote",
+				GlobalRemote:       true,
+				ContractorFriendly: false,
+				ApplyURL:           "https://supabase.com/jobs/infra",
+				Keywords:           []string{"backend", "infra"},
+				FirstSeenAt:        time.Now().UTC(),
+			},
+		},
+	}
+	_, _, err = store.SaveCompanyAndRoles(ctx, meta)
+	if err != nil {
+		t.Fatalf("SaveCompanyAndRoles failed: %v", err)
+	}
+
+	var postCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		postCount.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		var envelope struct {
+			Target string            `json:"target"`
+			Jobs   []SheetJobPayload `json:"jobs"`
+		}
+		if err := json.Unmarshal(body, &envelope); err != nil {
+			t.Errorf("unmarshal envelope failed: %v", err)
+		}
+		if envelope.Target != "jobs" {
+			t.Errorf("expected target 'jobs', got %s", envelope.Target)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer server.Close()
+
+	client := NewSheetsClient(server.URL)
+
+	res, err := client.SyncJobs(ctx, store, SyncOptions{
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("SyncJobs failed: %v", err)
+	}
+
+	if res.TotalProcessed != 2 {
+		t.Errorf("expected 2 processed roles, got %d", res.TotalProcessed)
+	}
+	if res.TotalSynced != 2 {
+		t.Errorf("expected 2 synced roles, got %d", res.TotalSynced)
+	}
+	if postCount.Load() != 1 {
+		t.Errorf("expected 1 webhook request, got %d", postCount.Load())
 	}
 }

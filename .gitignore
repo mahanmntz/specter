@@ -25,3 +25,6 @@ Thumbs.db
 # Dynamic run archives
 reports/runs/
 reports/latest
+
+# Environment variables
+.env

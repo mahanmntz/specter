@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -114,25 +116,42 @@ func NewGitMiner(f *crawler.Fetcher, opts GitMinerOptions) *GitMiner {
 	if toks == "" {
 		toks = opts.GitHubToken
 	}
+	if toks == "" {
+		toks = os.Getenv("GITHUB_TOKENS")
+		if toks == "" {
+			toks = os.Getenv("GITHUB_TOKEN")
+		}
+	}
+
+	if envRepos := os.Getenv("SPECTER_MAX_REPOS"); envRepos != "" {
+		if n, err := strconv.Atoi(envRepos); err == nil && n > 0 {
+			opts.MaxRepos = n
+		}
+	}
+	if envCommits := os.Getenv("SPECTER_MAX_COMMITS"); envCommits != "" {
+		if n, err := strconv.Atoi(envCommits); err == nil && n > 0 {
+			opts.MaxCommitsRepo = n
+		}
+	}
 
 	if toks == "" {
-		if opts.MaxRepos <= 0 || opts.MaxRepos > 5 {
-			opts.MaxRepos = 4
+		if opts.MaxRepos <= 0 {
+			opts.MaxRepos = 8
 		}
-		if opts.MaxCommitsRepo <= 0 || opts.MaxCommitsRepo > 15 {
-			opts.MaxCommitsRepo = 10
+		if opts.MaxCommitsRepo <= 0 {
+			opts.MaxCommitsRepo = 20
 		}
 	} else {
 		if opts.MaxRepos <= 0 {
-			opts.MaxRepos = 15
+			opts.MaxRepos = 20
 		}
 		if opts.MaxCommitsRepo <= 0 {
-			opts.MaxCommitsRepo = 25
+			opts.MaxCommitsRepo = 40
 		}
 	}
 
 	if opts.PolitenessDelay <= 0 {
-		opts.PolitenessDelay = 200 * time.Millisecond
+		opts.PolitenessDelay = 150 * time.Millisecond
 	}
 
 	return &GitMiner{
@@ -394,7 +413,7 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 		return nil, fmt.Errorf("failed unmarshaling GitHub repos: %w", err)
 	}
 
-	// Filter backend-relevant repositories
+	// Filter backend and engineering repositories across modern tech stacks
 	var targetRepos []ghRepoDetail
 	for _, r := range repos {
 		if r.Fork {
@@ -402,7 +421,17 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 		}
 		lang := strings.ToLower(r.Language)
 		name := strings.ToLower(r.Name)
-		isBackend := lang == "go" || lang == "rust" || lang == "c++" ||
+
+		// Skip documentation-only, website-only, or meta repos
+		if strings.Contains(name, "docs") || strings.Contains(name, "documentation") ||
+			strings.Contains(name, ".github") || strings.Contains(name, "blog") ||
+			strings.Contains(name, "website") || strings.Contains(name, "landing") {
+			continue
+		}
+
+		isEngRepo := lang == "go" || lang == "rust" || lang == "c++" || lang == "c" ||
+			lang == "python" || lang == "typescript" || lang == "javascript" ||
+			lang == "java" || lang == "kotlin" || lang == "scala" || lang == "elixir" || lang == "c#" ||
 			strings.Contains(name, "backend") ||
 			strings.Contains(name, "server") ||
 			strings.Contains(name, "service") ||
@@ -411,11 +440,21 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 			strings.Contains(name, "api") ||
 			strings.Contains(name, "core") ||
 			strings.Contains(name, "distributed") ||
-			strings.Contains(name, "pebble") ||
 			strings.Contains(name, "storage") ||
-			strings.Contains(name, "helm")
+			strings.Contains(name, "database") ||
+			strings.Contains(name, "data") ||
+			strings.Contains(name, "platform") ||
+			strings.Contains(name, "cloud") ||
+			strings.Contains(name, "proxy") ||
+			strings.Contains(name, "worker") ||
+			strings.Contains(name, "cli") ||
+			strings.Contains(name, "client") ||
+			strings.Contains(name, "sdk") ||
+			strings.Contains(name, "lib") ||
+			strings.Contains(name, "helm") ||
+			strings.Contains(name, "operator")
 
-		if isBackend {
+		if isEngRepo {
 			targetRepos = append(targetRepos, r)
 		}
 	}
@@ -666,12 +705,40 @@ func (m *GitMiner) enrichLeadProfile(ctx context.Context, lead *EngineeringLead,
 	lead.Location = profile.Location
 	lead.WebsiteURL = profile.Blog
 
-	// Extract LinkedIn from blog or bio
+	// 1. Extract direct LinkedIn from blog or bio
 	searchBlob := profile.Blog + " " + profile.Bio
 	if match := linkedInRegex.FindStringSubmatch(searchBlob); len(match) >= 2 {
 		lead.LinkedInURL = "https://www.linkedin.com/in/" + strings.Trim(match[1], "/")
-	} else {
-		lead.LinkedInURL = generateOSINTLinkedIn(lead.Name, companyName, lead.Domain)
+	}
+
+	// 2. Query GitHub social accounts API: /users/{username}/social_accounts
+	if lead.LinkedInURL == "" && handle != "" {
+		socialAPI := fmt.Sprintf("https://api.github.com/users/%s/social_accounts", handle)
+		if sRes, sErr := m.fetcher.FetchWithHeaders(ctx, socialAPI, m.authHeaders()); sErr == nil && sRes.StatusCode == http.StatusOK {
+			type socialAccount struct {
+				Provider string `json:"provider"`
+				URL      string `json:"url"`
+			}
+			var accounts []socialAccount
+			if json.Unmarshal(sRes.Body, &accounts) == nil {
+				for _, acc := range accounts {
+					if strings.Contains(strings.ToLower(acc.Provider), "linkedin") || strings.Contains(strings.ToLower(acc.URL), "linkedin.com/in") {
+						lead.LinkedInURL = acc.URL
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Fallback: if personal handle, provide direct candidate link or OSINT search
+	if lead.LinkedInURL == "" {
+		cleanHandle := strings.TrimPrefix(handle, "@")
+		if !strings.ContainsAny(cleanHandle, "._-") && len(cleanHandle) >= 3 && len(cleanHandle) <= 20 {
+			lead.LinkedInURL = "https://www.linkedin.com/in/" + cleanHandle
+		} else {
+			lead.LinkedInURL = generateOSINTLinkedIn(lead.Name, companyName, lead.Domain)
+		}
 	}
 }
 
@@ -710,11 +777,12 @@ func (m *GitMiner) extractFromPatch(ctx context.Context, org, repo, sha string, 
 	return "", ""
 }
 
-// ClassifyBackendArchetype categorizes prospects into diverse backend archetypes and returns fit score.
+// ClassifyBackendArchetype categorizes prospects into diverse, realistic backend & software engineering archetypes.
 func ClassifyBackendArchetype(commitMsgs []string, languages map[string]int, commitCount int, repoName string, signals []string) (string, int) {
-	combined := strings.ToLower(strings.Join(commitMsgs, " ") + " " + repoName)
+	msgsCombined := strings.ToLower(strings.Join(commitMsgs, " "))
+	combinedWithRepo := msgsCombined + " " + strings.ToLower(repoName)
 
-	words := strings.FieldsFunc(combined, func(r rune) bool {
+	words := strings.FieldsFunc(combinedWithRepo, func(r rune) bool {
 		return r == ' ' || r == '/' || r == '-' || r == '_' || r == ':' || r == ',' || r == '.' || r == '(' || r == ')' || r == '[' || r == ']' || r == '"' || r == '\''
 	})
 	hasWord := func(target string) bool {
@@ -727,58 +795,82 @@ func ClassifyBackendArchetype(commitMsgs []string, languages map[string]int, com
 		return false
 	}
 
-	role := "Core Contributor"
+	role := ""
 
-	// 1. Engineering Leadership: CTO, VP of Eng, Director of Engineering, Tech Lead, Engineering Manager
-	if hasWord("cto") || hasWord("vp") || strings.Contains(combined, "vp of engineering") || strings.Contains(combined, "director of engineering") {
+	// 1. Engineering Leadership: CTO, VP, Director of Engineering, Engineering Manager, Tech Lead
+	if hasWord("cto") || strings.Contains(combinedWithRepo, "vp of engineering") || strings.Contains(combinedWithRepo, "director of engineering") {
 		role = "Engineering Leadership"
-	} else if strings.Contains(combined, "engineering manager") || hasWord("em") {
+	} else if strings.Contains(combinedWithRepo, "engineering manager") || hasWord("em") {
 		role = "Engineering Manager"
-	} else if strings.Contains(combined, "tech lead") || strings.Contains(combined, "lead engineer") || strings.Contains(combined, "team lead") ||
-		strings.Contains(combined, "roadmap") || hasWord("rfc") || strings.Contains(combined, "cut release") || strings.Contains(combined, "release candidate") {
+	} else if strings.Contains(combinedWithRepo, "tech lead") || strings.Contains(combinedWithRepo, "lead engineer") || strings.Contains(combinedWithRepo, "team lead") ||
+		strings.Contains(msgsCombined, "roadmap") || hasWord("rfc") || strings.Contains(msgsCombined, "cut release") || strings.Contains(msgsCombined, "release candidate") {
 		role = "Tech Lead"
 	}
 
-	// 2. Staff / Principal: Principal Engineer, Staff Distributed Systems Engineer, Architect
-	if role == "Core Contributor" {
-		if hasWord("principal") || hasWord("staff") || hasWord("architect") || strings.Contains(combined, "architecture") ||
-			strings.Contains(combined, "distributed systems") || strings.Contains(combined, "consensus") || strings.Contains(combined, "raft") ||
-			strings.Contains(combined, "paxos") || strings.Contains(combined, "invariants") || strings.Contains(combined, "design doc") ||
-			strings.Contains(combined, "fault tolerance") || (commitCount >= 8 && (strings.Contains(repoName, "core") || strings.Contains(repoName, "storage") || strings.Contains(repoName, "server"))) {
-			if strings.Contains(combined, "distributed") || strings.Contains(combined, "raft") || strings.Contains(combined, "consensus") {
+	// 2. Staff / Principal Engineers
+	if role == "" {
+		if hasWord("principal") || hasWord("staff") || hasWord("architect") || strings.Contains(msgsCombined, "architecture") ||
+			strings.Contains(msgsCombined, "distributed systems") || strings.Contains(msgsCombined, "consensus") || strings.Contains(msgsCombined, "raft") ||
+			strings.Contains(msgsCombined, "paxos") || commitCount >= 10 {
+			if strings.Contains(msgsCombined, "distributed") || strings.Contains(msgsCombined, "raft") || strings.Contains(msgsCombined, "consensus") {
 				role = "Staff Distributed Systems Engineer"
-			} else if strings.Contains(combined, "architect") {
+			} else if strings.Contains(msgsCombined, "architect") {
 				role = "Principal Systems Architect"
 			} else {
-				role = "Staff / Principal"
+				role = "Staff Software Engineer"
 			}
 		}
 	}
 
-	// 3. Senior Backend: Senior Go Engineer, Infrastructure Engineer, Core Storage Engineer, Platform Engineer
-	if role == "Core Contributor" {
-		if hasWord("storage") || hasWord("pebble") || hasWord("badger") || hasWord("lsm") || hasWord("indexing") || hasWord("btree") {
+	// 3. Specialized & Domain Engineers (Full Stack, DevOps/Platform, Distributed, Storage)
+	if role == "" {
+		hasFrontend := hasWord("react") || hasWord("vue") || hasWord("frontend") || hasWord("ui") || hasWord("fullstack") ||
+			(languages["TypeScript"] > 0 && (languages["Go"] > 0 || languages["Python"] > 0 || languages["Rust"] > 0))
+		hasStorage := strings.Contains(msgsCombined, "storage") || strings.Contains(msgsCombined, "lsm") ||
+			strings.Contains(msgsCombined, "wal") || strings.Contains(msgsCombined, "btree") || strings.Contains(msgsCombined, "pebble") || strings.Contains(msgsCombined, "compaction")
+		hasInfra := hasWord("k8s") || hasWord("kubernetes") || hasWord("operator") || hasWord("helm") || hasWord("terraform") ||
+			hasWord("docker") || strings.Contains(msgsCombined, "ci/cd") || strings.Contains(msgsCombined, "devops") || strings.Contains(msgsCombined, "crd")
+		hasDistributed := hasWord("cluster") || hasWord("replication") || hasWord("sharding") || hasWord("partition") ||
+			hasWord("consensus") || hasWord("paxos") || hasWord("raft") || hasWord("gossip")
+
+		if hasFrontend {
+			role = "Full Stack Engineer"
+		} else if hasStorage {
 			role = "Core Storage Engineer"
-		} else if hasWord("k8s") || hasWord("kubernetes") || hasWord("operator") || hasWord("helm") || strings.Contains(combined, "infra") {
+		} else if hasInfra {
 			role = "Infrastructure Engineer"
-		} else if hasWord("grpc") || hasWord("proto") || hasWord("protobuf") || hasWord("pipeline") || hasWord("kafka") || hasWord("redis") || hasWord("postgres") ||
-			hasWord("senior") || hasWord("sr") || hasWord("concurrency") || hasWord("mutex") || hasWord("goroutine") || commitCount >= 3 {
+		} else if hasDistributed {
+			role = "Distributed Systems Engineer"
+		}
+	}
+
+	// 4. Senior vs Mid Backend / Software Engineer Archetypes
+	if role == "" {
+		isSenior := hasWord("senior") || hasWord("sr") || commitCount >= 4 ||
+			hasWord("grpc") || hasWord("concurrency") || hasWord("pipeline") || hasWord("database") || hasWord("postgres") || hasWord("kafka")
+
+		if isSenior {
 			if languages["Go"] > 0 {
 				role = "Senior Go Engineer"
+			} else if languages["Rust"] > 0 {
+				role = "Senior Systems Engineer (Rust)"
+			} else if languages["Python"] > 0 {
+				role = "Senior Backend Engineer (Python)"
 			} else {
 				role = "Senior Backend Engineer"
 			}
-		}
-	}
-
-	// 4. Core Contributor: Active backend contributor, Maintainer
-	if role == "Core Contributor" {
-		if languages["Go"] > 0 {
-			role = "Core Contributor (Go)"
-		} else if languages["Rust"] > 0 {
-			role = "Core Contributor (Rust)"
 		} else {
-			role = "Active Contributor"
+			if languages["Go"] > 0 {
+				role = "Backend Engineer (Go)"
+			} else if languages["Rust"] > 0 {
+				role = "Systems Engineer (Rust)"
+			} else if languages["Python"] > 0 {
+				role = "Backend Engineer (Python)"
+			} else if languages["TypeScript"] > 0 || languages["JavaScript"] > 0 {
+				role = "Software Engineer"
+			} else {
+				role = "Backend Engineer"
+			}
 		}
 	}
 
@@ -841,24 +933,30 @@ func CalculateRelevanceScore(role string, languages map[string]int, domainMatch 
 	score := 40
 
 	switch role {
-	case "Tech Lead", "Engineering Leadership", "Engineering Manager":
+	case "Tech Lead", "Engineering Leadership", "Engineering Manager", "VP of Engineering":
 		score += 25
-	case "Staff/Principal", "Staff / Principal", "Staff Distributed Systems Engineer", "Principal Systems Architect":
+	case "Staff/Principal", "Staff / Principal", "Staff Software Engineer", "Staff Distributed Systems Engineer", "Principal Systems Architect":
 		score += 25
-	case "Senior Backend", "Senior Go Engineer", "Core Storage Engineer", "Infrastructure Engineer":
+	case "Senior Backend", "Senior Backend Engineer", "Senior Go Engineer", "Senior Systems Engineer (Rust)", "Senior Backend Engineer (Python)", "Senior Platform Engineer", "Core Storage Engineer", "Infrastructure Engineer", "Distributed Systems Engineer", "Database Systems Engineer":
 		score += 15
-	case "Engineer", "Core Contributor", "Core Contributor (Go)", "Core Contributor (Rust)", "Active Contributor":
+	case "Backend Engineer", "Software Engineer", "Backend Engineer (Go)", "Backend Engineer (Python)", "Systems Engineer (Rust)", "Full Stack Engineer", "Platform / Cloud Engineer", "DevOps Engineer":
+		score += 10
+	case "Engineer", "Active Contributor", "Core Contributor", "Core Contributor (Go)", "Core Contributor (Rust)":
 		score += 5
 	}
 
 	hasGo := languages["Go"] > 0
 	hasRust := languages["Rust"] > 0
 	hasCpp := languages["C++"] > 0
+	hasPython := languages["Python"] > 0
+	hasTs := languages["TypeScript"] > 0 || languages["JavaScript"] > 0
 
 	if hasGo {
 		score += 20
 	} else if hasRust || hasCpp {
 		score += 15
+	} else if hasPython || hasTs {
+		score += 10
 	} else if len(languages) > 0 {
 		score += 5
 	}
