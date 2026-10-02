@@ -43,6 +43,10 @@ type EngineeringLead struct {
 	LinkedInURL    string   `json:"linkedin_url,omitempty"`
 	Location       string   `json:"location,omitempty"`
 	MatchedSignals []string `json:"matched_signals,omitempty"`
+
+	// Synchronization State
+	SyncedToSheets bool      `json:"synced_to_sheets,omitempty"`
+	SyncedAt       time.Time `json:"synced_at,omitempty"`
 }
 
 // RepoYieldStats tracks commit scanning and yield statistics per repository.
