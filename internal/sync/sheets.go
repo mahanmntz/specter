@@ -32,22 +32,24 @@ const (
 
 // SheetLeadPayload matches the JSON schema expected by the Google Apps Script doPost handler for Contacts tab.
 type SheetLeadPayload struct {
-	Score      int    `json:"score"`
-	Company    string `json:"company"`
-	Name       string `json:"name"`
-	Role       string `json:"role"`
-	Topic      string `json:"topic"`
-	Email      string `json:"email"`
-	LinkedIn   string `json:"linkedin"`
-	GitHub     string `json:"github"`
-	Repo       string `json:"repo"`
-	Icebreaker string `json:"icebreaker"`
+	Score         int    `json:"score"`
+	PersonalScore int    `json:"personal_score,omitempty"`
+	Company       string `json:"company"`
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	Topic         string `json:"topic"`
+	Email         string `json:"email"`
+	LinkedIn      string `json:"linkedin"`
+	GitHub        string `json:"github"`
+	Repo          string `json:"repo"`
+	Icebreaker    string `json:"icebreaker"`
 }
 
 // SheetJobPayload matches the JSON schema expected by the Google Apps Script doPost handler for Jobs tab.
 type SheetJobPayload struct {
 	Company            string `json:"company"`
 	Title              string `json:"title"`
+	PersonalScore      int    `json:"personal_score,omitempty"`
 	Location           string `json:"location"`
 	WorkplaceType      string `json:"workplace_type"`
 	RemotePolicy       string `json:"remote_policy"`
@@ -165,17 +167,24 @@ func ConvertLeadToPayload(lead signals.EngineeringLead) SheetLeadPayload {
 		icebreaker = "Impressed by your engineering contributions; wanted to connect regarding backend systems and distributed architecture."
 	}
 
+	pScore := lead.PersonalScore
+	if pScore == 0 {
+		userSkills := signals.GetUserSkills()
+		pScore, _ = signals.CalculateSkillMatch(lead.Role+" "+topic+" "+icebreaker, userSkills)
+	}
+
 	return SheetLeadPayload{
-		Score:      lead.RelevanceScore,
-		Company:    company,
-		Name:       lead.Name,
-		Role:       lead.Role,
-		Topic:      topic,
-		Email:      lead.Email,
-		LinkedIn:   lead.LinkedInURL,
-		GitHub:     gh,
-		Repo:       repo,
-		Icebreaker: icebreaker,
+		Score:         lead.RelevanceScore,
+		PersonalScore: pScore,
+		Company:       company,
+		Name:          lead.Name,
+		Role:          lead.Role,
+		Topic:         topic,
+		Email:         lead.Email,
+		LinkedIn:      lead.LinkedInURL,
+		GitHub:        gh,
+		Repo:          repo,
+		Icebreaker:    icebreaker,
 	}
 }
 
@@ -208,9 +217,17 @@ func ConvertJobToPayload(job ats.JobPosting) SheetJobPayload {
 		}
 	}
 
+	pScore := job.PersonalScore
+	if pScore == 0 {
+		userSkills := signals.GetUserSkills()
+		corpus := job.Title + " " + job.Department + " " + loc + " " + job.RemotePolicy + " " + strings.Join(job.Keywords, " ")
+		pScore, _ = signals.CalculateSkillMatch(corpus, userSkills)
+	}
+
 	return SheetJobPayload{
 		Company:            comp,
 		Title:              job.Title,
+		PersonalScore:      pScore,
 		Location:           loc,
 		WorkplaceType:      workplace,
 		RemotePolicy:       job.RemotePolicy,

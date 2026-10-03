@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -608,9 +609,18 @@ func runLeads(args []string) {
 			return
 		}
 
+		userSkills := signals.GetUserSkills()
+		for i := range engLeads {
+			if engLeads[i].PersonalScore == 0 {
+				pScore, pMatches := signals.CalculateSkillMatch(engLeads[i].Role+" "+engLeads[i].TopLanguages+" "+strings.Join(engLeads[i].MatchedSignals, " "), userSkills)
+				engLeads[i].PersonalScore = pScore
+				engLeads[i].PersonalMatches = pMatches
+			}
+		}
+
 		fmt.Printf("\n📋 \033[1mDISCOVERED ENGINEERING LEADS (%d found)\033[0m\n", len(engLeads))
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-		fmt.Fprintln(w, "ID\tSCORE\tNAME\tARCHETYPE\tEMAIL\tGITHUB\tPROVENANCE\tCONTACTED")
+		fmt.Fprintln(w, "ID\tSCORE\tTECH MATCH\tNAME\tARCHETYPE\tEMAIL\tGITHUB\tPROVENANCE\tCONTACTED")
 		for _, l := range engLeads {
 			contactStatus := "No"
 			if l.Contacted {
@@ -639,8 +649,12 @@ func runLeads(args []string) {
 			if provDisplay == "" {
 				provDisplay = l.Source
 			}
-			fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
-				l.ID, l.RelevanceScore, l.Name, roleDisplay, l.Email, gh, provDisplay, contactStatus)
+			matchDisplay := fmt.Sprintf("🎯 %d%%", l.PersonalScore)
+			if len(l.PersonalMatches) > 0 {
+				matchDisplay = fmt.Sprintf("🎯 %d%% [%s]", l.PersonalScore, strings.Join(l.PersonalMatches, ", "))
+			}
+			fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				l.ID, l.RelevanceScore, matchDisplay, l.Name, roleDisplay, l.Email, gh, provDisplay, contactStatus)
 		}
 		w.Flush()
 		fmt.Println()
@@ -870,20 +884,42 @@ func runApply(args []string) {
 		return
 	}
 
+	userSkills := signals.GetUserSkills()
+	for i := range roles {
+		corpus := roles[i].Title + " " + roles[i].Department + " " + roles[i].Location + " " + roles[i].RemotePolicy + " " + strings.Join(roles[i].Keywords, " ")
+		score, matches := signals.CalculateSkillMatch(corpus, userSkills)
+		roles[i].PersonalScore = score
+		roles[i].PersonalMatches = matches
+	}
+
+	sort.SliceStable(roles, func(i, j int) bool {
+		if roles[i].PersonalScore != roles[j].PersonalScore {
+			return roles[i].PersonalScore > roles[j].PersonalScore
+		}
+		if roles[i].IsNew != roles[j].IsNew {
+			return roles[i].IsNew
+		}
+		return false
+	})
+
 	fmt.Println()
-	fmt.Printf("🎯 \033[1;36mSPECTER DIRECT ONE-CLICK APPLY BOARD\033[0m (%d roles found)\n", len(roles))
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════════════════════════════════")
+	fmt.Printf("🎯 \033[1;36mSPECTER DIRECT ONE-CLICK APPLY BOARD\033[0m (%d roles found | Personal Tech Match: \033[1;33m%s\033[0m)\n", len(roles), strings.Join(userSkills, ", "))
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════")
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "STATUS\tCOMPANY\tROLE TITLE\tPOLICY\tDIRECT APPLY LINK")
+	fmt.Fprintln(w, "TECH MATCH\tSTATUS\tCOMPANY\tROLE TITLE\tPOLICY\tDIRECT APPLY LINK")
 	for i, r := range roles {
-		if i >= 35 {
-			fmt.Fprintf(w, "... and %d more roles in database. Use --export to generate full markdown.\n", len(roles)-35)
+		if i >= 40 {
+			fmt.Fprintf(w, "... and %d more roles in database. Use --export to generate full markdown.\n", len(roles)-40)
 			break
 		}
 		status := "Active"
 		if r.IsNew {
 			status = "🔥 NEW"
+		}
+		matchBadge := fmt.Sprintf("🎯 %d%%", r.PersonalScore)
+		if len(r.PersonalMatches) > 0 {
+			matchBadge = fmt.Sprintf("🎯 %d%% [%s]", r.PersonalScore, strings.Join(r.PersonalMatches, ", "))
 		}
 		comp := r.CompanyDomain
 		if comp == "" {
@@ -893,10 +929,10 @@ func runApply(args []string) {
 		if applyURL == "" {
 			applyURL = r.URL
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", status, comp, r.Title, r.RemotePolicy, applyURL)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", matchBadge, status, comp, r.Title, r.RemotePolicy, applyURL)
 	}
 	w.Flush()
-	fmt.Println("═══════════════════════════════════════════════════════════════════════════════════════════════════════════")
+	fmt.Println("═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════")
 
 	if *exportMD {
 		path, _, err := reporter.GenerateDirectApplyReport(roles, *outDir)

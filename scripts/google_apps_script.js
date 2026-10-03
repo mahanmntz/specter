@@ -89,7 +89,7 @@ function appendLeads(ss, leads) {
   }
   
   var headers = [
-    "Score", "Company", "Name", "Role", "Topic", "Email", "LinkedIn", "GitHub", "Repo", "Icebreaker", "Synced At"
+    "Score", "Tech Match %", "Company", "Name", "Role", "Topic", "Email", "LinkedIn", "GitHub", "Repo", "Icebreaker", "Synced At"
   ];
   
   initSheetHeaders(sheet, headers, "#0F172A"); // Slate-900 Dark Header
@@ -98,8 +98,8 @@ function appendLeads(ss, leads) {
   var existingMap = {};
   var lastRow = sheet.getLastRow();
   if (lastRow > 1) {
-    var emailValues = sheet.getRange(2, 6, lastRow - 1, 1).getValues();
-    var ghValues = sheet.getRange(2, 8, lastRow - 1, 1).getValues();
+    var emailValues = sheet.getRange(2, 7, lastRow - 1, 1).getValues();
+    var ghValues = sheet.getRange(2, 9, lastRow - 1, 1).getValues();
     for (var i = 0; i < emailValues.length; i++) {
       var em = (emailValues[i][0] || "").toString().toLowerCase().trim();
       var gh = (ghValues[i][0] || "").toString().toLowerCase().trim();
@@ -123,6 +123,7 @@ function appendLeads(ss, leads) {
     
     newRows.push([
       l.score || 0,
+      l.personal_score ? l.personal_score + "%" : "0%",
       l.company || "",
       l.name || "",
       l.role || "",
@@ -160,7 +161,7 @@ function appendJobs(ss, jobs) {
   }
   
   var headers = [
-    "Company", "Role Title", "Location", "Workplace", "Remote Policy", "Global Remote?", "Contractor Friendly?", "Compensation", "Apply Link", "Discovered At"
+    "Company", "Role Title", "Tech Match %", "Location", "Workplace", "Remote Policy", "Global Remote?", "Contractor Friendly?", "Compensation", "Apply Link", "Discovered At"
   ];
   
   initSheetHeaders(sheet, headers, "#1E293B"); // Slate-800 Header
@@ -169,7 +170,7 @@ function appendJobs(ss, jobs) {
   var existingMap = {};
   var lastRow = sheet.getLastRow();
   if (lastRow > 1) {
-    var applyValues = sheet.getRange(2, 9, lastRow - 1, 1).getValues();
+    var applyValues = sheet.getRange(2, 10, lastRow - 1, 1).getValues();
     for (var i = 0; i < applyValues.length; i++) {
       var url = (applyValues[i][0] || "").toString().toLowerCase().trim();
       if (url) existingMap[url] = true;
@@ -187,6 +188,7 @@ function appendJobs(ss, jobs) {
     newRows.push([
       job.company || "",
       job.title || "",
+      job.personal_score ? job.personal_score + "%" : "0%",
       job.location || "",
       job.workplace_type || "",
       job.remote_policy || "",

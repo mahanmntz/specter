@@ -47,6 +47,10 @@ type EngineeringLead struct {
 	Location       string   `json:"location,omitempty"`
 	MatchedSignals []string `json:"matched_signals,omitempty"`
 
+	// Personal Skills Synergy
+	PersonalScore   int      `json:"personal_score,omitempty"`
+	PersonalMatches []string `json:"personal_matches,omitempty"`
+
 	// Synchronization State
 	SyncedToSheets bool      `json:"synced_to_sheets,omitempty"`
 	SyncedAt       time.Time `json:"synced_at,omitempty"`
@@ -653,18 +657,25 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 
 		topLangs := formatTopLanguages(agg.Languages)
 
+		// Personal skill match against user profile (MY_SKILLS)
+		userSkills := GetUserSkills()
+		leadCorpus := role + " " + topLangs + " " + strings.Join(matchedSignals, " ") + " " + strings.Join(agg.CommitMsgs, " ")
+		personalScore, personalMatches := CalculateSkillMatch(leadCorpus, userSkills)
+
 		lead := EngineeringLead{
-			Domain:         companyDomain,
-			CompanyDomain:  companyDomain,
-			Name:           agg.Name,
-			Role:           role,
-			Email:          agg.Email,
-			EmailVerified:  emailVerified,
-			Source:         "git_commit",
-			GitHubHandle:   agg.GitHubHandle,
-			TopLanguages:   topLangs,
-			RelevanceScore: score,
-			DiscoveredAt:   time.Now().UTC(),
+			Domain:          companyDomain,
+			CompanyDomain:   companyDomain,
+			Name:            agg.Name,
+			Role:            role,
+			Email:           agg.Email,
+			EmailVerified:   emailVerified,
+			Source:          "git_commit",
+			GitHubHandle:    agg.GitHubHandle,
+			TopLanguages:    topLangs,
+			RelevanceScore:  score,
+			PersonalScore:   personalScore,
+			PersonalMatches: personalMatches,
+			DiscoveredAt:    time.Now().UTC(),
 			Contacted:      false,
 			RepoName:       agg.RepoName,
 			RepoURL:        agg.RepoURL,

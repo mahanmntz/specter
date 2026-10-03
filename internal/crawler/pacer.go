@@ -253,18 +253,22 @@ func (h *hostState) recordRateLimit(retryAfter time.Duration) {
 	var backoff time.Duration
 	if retryAfter > 0 {
 		backoff = retryAfter
-	} else {
-		// Truncated exponential backoff: 2^n * base_delay + jitter, capped at 60s
-		n := h.consecutiveBackoffs
-		if n > 5 {
-			n = 5
+		// Cap rate limit backoff to 15 seconds max to keep the crawl moving
+		if backoff > 15*time.Second {
+			backoff = 15 * time.Second
 		}
-		baseDelay := 2 * time.Second
+	} else {
+		// Truncated exponential backoff: 2^n * base_delay + jitter, capped at 15s
+		n := h.consecutiveBackoffs
+		if n > 3 {
+			n = 3
+		}
+		baseDelay := 1500 * time.Millisecond
 		mult := time.Duration(1 << n)
-		jitter := time.Duration(rand.Int64N(int64(1000 * time.Millisecond)))
+		jitter := time.Duration(rand.Int64N(int64(500 * time.Millisecond)))
 		backoff = mult*baseDelay + jitter
-		if backoff > 60*time.Second {
-			backoff = 60 * time.Second
+		if backoff > 15*time.Second {
+			backoff = 15 * time.Second
 		}
 		h.consecutiveBackoffs++
 	}

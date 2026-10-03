@@ -27,6 +27,8 @@ type JobPosting struct {
 	FirstSeenAt        time.Time `json:"first_seen_at"`
 	LastSeenAt         time.Time `json:"last_seen_at"`
 	IsNew              bool      `json:"is_new"`
+	PersonalScore      int       `json:"personal_score,omitempty"`
+	PersonalMatches    []string  `json:"personal_matches,omitempty"`
 }
 
 // CompanyMeta represents discovered company metadata, engineering signals, and active roles.

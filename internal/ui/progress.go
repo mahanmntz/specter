@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -142,14 +143,22 @@ func (p *ProgressTracker) SetRateLimitStatus(status string) {
 	p.mu.Unlock()
 }
 
-// Log prints an informational log without tearing the live progress line.
+// Log prints an informational log with timestamp without tearing the live progress line.
 func (p *ProgressTracker) Log(format string, args ...any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	msg := fmt.Sprintf(format, args...)
+	timestamp := time.Now().Format("15:04:05")
+
 	// Clear current progress line
 	fmt.Fprintf(p.out, "\r\033[K")
-	fmt.Fprintf(p.out, format+"\n", args...)
+	if strings.HasPrefix(msg, "   ") {
+		// Indented sub-log
+		fmt.Fprintf(p.out, "           %s\n", strings.TrimPrefix(msg, "   "))
+	} else {
+		fmt.Fprintf(p.out, "\033[2m[%s]\033[0m %s\n", timestamp, msg)
+	}
 }
 
 func (p *ProgressTracker) render() {

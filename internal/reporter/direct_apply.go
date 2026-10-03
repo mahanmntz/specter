@@ -56,8 +56,8 @@ func GenerateDirectApplyReport(roles []ats.JobPosting, outDir string) (string, s
 	sb.WriteString("## 🟢 Worldwide & Contractor-Friendly Positions (Zero Visa / B2B Ready)\n\n")
 	sb.WriteString("These companies hire globally via **B2B Contractor / Deel / Remote.com**, avoiding US/EU domestic tax (W-2) and visa sponsorship barriers. Perfect for engineers in MENA, LATAM, Eastern Europe, and South Asia.\n\n")
 
-	sb.WriteString("| Status | Company / Domain | Position Title | Remote Policy | Compensation | Direct Apply Link |\n")
-	sb.WriteString("| :---: | :--- | :--- | :--- | :--- | :---: |\n")
+	sb.WriteString("| Status | Tech Match | Company / Domain | Position Title | Remote Policy | Compensation | Direct Apply Link |\n")
+	sb.WriteString("| :---: | :---: | :--- | :--- | :--- | :--- | :---: |\n")
 
 	var globalRoles []ats.JobPosting
 	var otherRoles []ats.JobPosting
@@ -71,12 +71,17 @@ func GenerateDirectApplyReport(roles []ats.JobPosting, outDir string) (string, s
 	}
 
 	if len(globalRoles) == 0 {
-		sb.WriteString("| - | *No worldwide roles currently detected in this batch* | - | - | - | - |\n")
+		sb.WriteString("| - | - | *No worldwide roles currently detected in this batch* | - | - | - | - |\n")
 	} else {
 		for _, r := range globalRoles {
 			statusBadge := "Active"
 			if r.IsNew {
 				statusBadge = "**🔥 NEW**"
+			}
+
+			matchBadge := "🎯 -"
+			if r.PersonalScore > 0 {
+				matchBadge = fmt.Sprintf("🎯 %d%%", r.PersonalScore)
 			}
 
 			comp := r.Compensation
@@ -99,8 +104,8 @@ func GenerateDirectApplyReport(roles []ats.JobPosting, outDir string) (string, s
 				companyName = extractDomainFromURL(r.URL)
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | `%s` | **%s**<br><sub>📍 %s</sub> | %s | %s | [**⚡ Apply Now ↗**](%s) |\n",
-				statusBadge, companyName, r.Title, loc, r.RemotePolicy, comp, applyURL))
+			sb.WriteString(fmt.Sprintf("| %s | %s | `%s` | **%s**<br><sub>📍 %s</sub> | %s | %s | [**⚡ Apply Now ↗**](%s) |\n",
+				statusBadge, matchBadge, companyName, r.Title, loc, r.RemotePolicy, comp, applyURL))
 		}
 	}
 
@@ -108,16 +113,20 @@ func GenerateDirectApplyReport(roles []ats.JobPosting, outDir string) (string, s
 
 	// Section 2: Other Roles (Timezone Flexible or Regional)
 	sb.WriteString("## 🟡 Timezone-Flexible & Regional Positions\n\n")
-	sb.WriteString("| Status | Company | Position Title | Policy / Location | Direct Apply Link |\n")
-	sb.WriteString("| :---: | :--- | :--- | :--- | :---: |\n")
+	sb.WriteString("| Status | Tech Match | Company | Position Title | Policy / Location | Direct Apply Link |\n")
+	sb.WriteString("| :---: | :---: | :--- | :--- | :--- | :---: |\n")
 
 	if len(otherRoles) == 0 {
-		sb.WriteString("| - | *No regional roles in this batch* | - | - | - |\n")
+		sb.WriteString("| - | - | *No regional roles in this batch* | - | - | - |\n")
 	} else {
 		for _, r := range otherRoles {
 			statusBadge := "Active"
 			if r.IsNew {
 				statusBadge = "**🔥 NEW**"
+			}
+			matchBadge := "🎯 -"
+			if r.PersonalScore > 0 {
+				matchBadge = fmt.Sprintf("🎯 %d%%", r.PersonalScore)
 			}
 			applyURL := r.ApplyURL
 			if applyURL == "" {
@@ -128,8 +137,8 @@ func GenerateDirectApplyReport(roles []ats.JobPosting, outDir string) (string, s
 				companyName = extractDomainFromURL(r.URL)
 			}
 
-			sb.WriteString(fmt.Sprintf("| %s | `%s` | **%s** | %s<br><sub>📍 %s</sub> | [Apply Directly ↗](%s) |\n",
-				statusBadge, companyName, r.Title, r.RemotePolicy, r.Location, applyURL))
+			sb.WriteString(fmt.Sprintf("| %s | %s | `%s` | **%s** | %s<br><sub>📍 %s</sub> | [Apply Directly ↗](%s) |\n",
+				statusBadge, matchBadge, companyName, r.Title, r.RemotePolicy, r.Location, applyURL))
 		}
 	}
 

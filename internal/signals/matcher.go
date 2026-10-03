@@ -1,6 +1,7 @@
 package signals
 
 import (
+	"os"
 	"regexp"
 	"strings"
 )
@@ -87,4 +88,66 @@ func ExtractSeniority(title string) string {
 	default:
 		return "Mid/Standard"
 	}
+}
+
+// GetUserSkills returns user's configured skill profile from MY_SKILLS environment variable.
+func GetUserSkills() []string {
+	raw := os.Getenv("MY_SKILLS")
+	if strings.TrimSpace(raw) == "" {
+		raw = "Go, Distributed Systems, Kubernetes, Docker, PostgreSQL, Redis, Microservices, Linux, gRPC, Cloud"
+	}
+	var skills []string
+	for _, s := range strings.Split(raw, ",") {
+		clean := strings.TrimSpace(s)
+		if clean != "" {
+			skills = append(skills, clean)
+		}
+	}
+	return skills
+}
+
+// CalculateSkillMatch matches target text against user's skills and computes a 0-100% synergy score.
+func CalculateSkillMatch(targetText string, userSkills []string) (int, []string) {
+	if len(userSkills) == 0 {
+		return 0, nil
+	}
+	textLower := " " + strings.ToLower(targetText) + " "
+	var matched []string
+	seen := make(map[string]bool)
+
+	for _, skill := range userSkills {
+		sLower := strings.ToLower(skill)
+		matches := false
+		switch sLower {
+		case "go", "golang":
+			matches = strings.Contains(textLower, " go ") || strings.Contains(textLower, "golang") ||
+				strings.Contains(textLower, "(go)") || strings.Contains(textLower, "go/") ||
+				strings.Contains(textLower, "go,") || strings.Contains(textLower, "go-")
+		case "k8s", "kubernetes":
+			matches = strings.Contains(textLower, "kubernetes") || strings.Contains(textLower, "k8s")
+		case "postgres", "postgresql":
+			matches = strings.Contains(textLower, "postgres") || strings.Contains(textLower, "postgresql")
+		default:
+			matches = strings.Contains(textLower, sLower)
+		}
+
+		if matches && !seen[sLower] {
+			seen[sLower] = true
+			matched = append(matched, skill)
+		}
+	}
+
+	if len(matched) == 0 {
+		return 0, nil
+	}
+
+	pct := int((float64(len(matched)) / float64(len(userSkills))) * 100)
+	if pct < 35 && len(matched) >= 1 {
+		pct = 30 + len(matched)*15
+	}
+	if pct > 100 {
+		pct = 100
+	}
+
+	return pct, matched
 }

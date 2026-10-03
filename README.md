@@ -256,6 +256,7 @@ Edit `.env` to configure your environment variables:
 | Variable | Description | Default / Example |
 | :--- | :--- | :--- |
 | `GITHUB_TOKENS` | Comma-separated list of GitHub Personal Access Tokens for rate-limit rotation. | `ghp_token1,ghp_token2` |
+| `MY_SKILLS` | Comma-separated list of your technical skills for personalized synergy matching. | `Go, Distributed Systems, Kubernetes, Docker, PostgreSQL, Redis, Microservices, Linux, gRPC, Cloud` |
 | `SPECTER_SHEETS_WEBHOOK` | Target Google Apps Script Webhook URL for two-tab synchronization. | `https://script.google.com/macros/s/.../exec` |
 | `SPECTER_CONCURRENCY` | Default concurrency level for crawl workers. | `4` |
 | `SPECTER_PACER_DELAY_MS` | Base pacing delay in milliseconds between requests per host. | `800` |

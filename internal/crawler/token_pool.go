@@ -149,10 +149,12 @@ func (p *TokenPool) AcquireToken(ctx context.Context) (string, error) {
 			return token, nil
 		}
 
-		// 2. All tokens are cooling: calculate dynamic wait duration
+		// 2. All tokens are cooling: calculate dynamic wait duration (capped at 15s)
 		waitDuration := time.Until(earliestReset)
 		if waitDuration <= 0 {
 			waitDuration = 200 * time.Millisecond
+		} else if waitDuration > 15*time.Second {
+			waitDuration = 15 * time.Second
 		}
 		p.mu.Unlock()
 
