@@ -73,14 +73,14 @@ func (w *WorkableAdapter) ExtractByBoardID(ctx context.Context, account, domain 
 		return nil, fmt.Errorf("failed decoding Workable JSON: %w", err)
 	}
 
-	jobs := make([]rawJob, 0, len(body.Jobs))
+	jobs := make([]RawJob, 0, len(body.Jobs))
 	for _, j := range body.Jobs {
 		posted, _ := time.Parse("2006-01-02", j.PublishedOn)
 		workplace := ""
 		if j.Telecommuting {
 			workplace = "remote"
 		}
-		jobs = append(jobs, rawJob{
+		jobs = append(jobs, RawJob{
 			ID:          j.Shortcode,
 			Title:       j.Title,
 			Department:  j.Department,
@@ -91,5 +91,5 @@ func (w *WorkableAdapter) ExtractByBoardID(ctx context.Context, account, domain 
 			PostedAt:    posted,
 		})
 	}
-	return buildMeta(formatCompanyName(account), domain, careers, "workable", jobs), nil
+	return BuildMeta(formatCompanyName(account), domain, careers, "workable", jobs), nil
 }

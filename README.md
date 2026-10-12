@@ -277,6 +277,15 @@ Edit `.env` to configure your environment variables:
 | Recruitee | `recruitee` | `acme.recruitee.com` |
 | Any other site | `generic` | `example.com` (DOM crawler) |
 
+### Aggregator feeds
+
+```bash
+./specter feeds                    # RemoteOK + Hacker News "Who is hiring?"
+./specter feeds --source=remoteok
+```
+
+Feeds map postings into the same database, so `apply`, `roles`, `export` and `sync` work on them unchanged.
+
 Adding a source = one file in `internal/ats/` implementing `BoardAdapter`, plus a line in `NewRegistry`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Ethical Use & Privacy

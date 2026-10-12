@@ -17,9 +17,9 @@ type BoardAdapter interface {
 	ExtractByBoardID(ctx context.Context, boardID, domain string) (*CompanyMeta, error)
 }
 
-// rawJob is the normalized shape every ATS adapter maps its postings into
+// RawJob is the normalized shape every ATS adapter maps its postings into
 // before shared relevance filtering and remote-policy classification.
-type rawJob struct {
+type RawJob struct {
 	ID          string
 	Title       string
 	Department  string
@@ -30,9 +30,9 @@ type rawJob struct {
 	PostedAt    time.Time
 }
 
-// buildMeta filters raw postings down to relevant backend roles and assembles CompanyMeta.
+// BuildMeta filters raw postings down to relevant backend roles and assembles CompanyMeta.
 // idPrefix namespaces role IDs per ATS (e.g. "workable").
-func buildMeta(name, domain, careersURL, idPrefix string, jobs []rawJob) *CompanyMeta {
+func BuildMeta(name, domain, careersURL, idPrefix string, jobs []RawJob) *CompanyMeta {
 	meta := &CompanyMeta{
 		Name:       name,
 		Domain:     domain,

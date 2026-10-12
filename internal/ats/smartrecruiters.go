@@ -75,14 +75,14 @@ func (s *SmartRecruitersAdapter) ExtractByBoardID(ctx context.Context, company, 
 		return nil, fmt.Errorf("failed decoding SmartRecruiters JSON: %w", err)
 	}
 
-	jobs := make([]rawJob, 0, len(body.Content))
+	jobs := make([]RawJob, 0, len(body.Content))
 	for _, p := range body.Content {
 		posted, _ := time.Parse(time.RFC3339, p.ReleasedAt)
 		workplace := ""
 		if p.Location.Remote {
 			workplace = "remote"
 		}
-		jobs = append(jobs, rawJob{
+		jobs = append(jobs, RawJob{
 			ID:         p.ID,
 			Title:      p.Name,
 			Department: p.Department.Label,
@@ -92,5 +92,5 @@ func (s *SmartRecruitersAdapter) ExtractByBoardID(ctx context.Context, company, 
 			PostedAt:   posted,
 		})
 	}
-	return buildMeta(formatCompanyName(company), domain, careers, "smartrecruiters", jobs), nil
+	return BuildMeta(formatCompanyName(company), domain, careers, "smartrecruiters", jobs), nil
 }

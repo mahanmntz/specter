@@ -78,14 +78,14 @@ func (r *RecruiteeAdapter) ExtractByBoardID(ctx context.Context, company, domain
 		return nil, fmt.Errorf("failed decoding Recruitee JSON: %w", err)
 	}
 
-	jobs := make([]rawJob, 0, len(body.Offers))
+	jobs := make([]RawJob, 0, len(body.Offers))
 	for _, o := range body.Offers {
 		posted, _ := time.Parse("2006-01-02 15:04:05 MST", o.CreatedAt)
 		workplace := ""
 		if o.Remote {
 			workplace = "remote"
 		}
-		jobs = append(jobs, rawJob{
+		jobs = append(jobs, RawJob{
 			ID:          fmt.Sprint(o.ID),
 			Title:       o.Title,
 			Department:  o.Department,
@@ -96,5 +96,5 @@ func (r *RecruiteeAdapter) ExtractByBoardID(ctx context.Context, company, domain
 			PostedAt:    posted,
 		})
 	}
-	return buildMeta(formatCompanyName(company), domain, careers, "recruitee", jobs), nil
+	return BuildMeta(formatCompanyName(company), domain, careers, "recruitee", jobs), nil
 }

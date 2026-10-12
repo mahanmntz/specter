@@ -19,6 +19,7 @@ import (
 	"specter/internal/config"
 	"specter/internal/crawler"
 	"specter/internal/exporter"
+	"specter/internal/feeds"
 	"specter/internal/reporter"
 	"specter/internal/scanner"
 	"specter/internal/seeds"
@@ -62,6 +63,8 @@ func main() {
 		runAutonomous(os.Args[2:])
 	case "scan":
 		runScan(os.Args[2:])
+	case "feeds":
+		runFeeds(os.Args[2:])
 	case "sync":
 		runSync(os.Args[2:])
 	case "apply":
@@ -534,6 +537,67 @@ func printCatalogSummary(store *storage.Store) {
 	fmt.Printf("   Query direct-apply jobs: `specter apply --global-only`\n\n")
 }
 
+// runFeeds ingests multi-company job aggregators (RemoteOK, Hacker News "Who is hiring?").
+func runFeeds(args []string) {
+	fs := flag.NewFlagSet("feeds", flag.ExitOnError)
+	source := fs.String("source", strings.Join(feeds.Names(), ","), "Comma-separated feeds to ingest ("+strings.Join(feeds.Names(), ", ")+")")
+	dbPath := fs.String("db", "specter.db", "SQLite database path")
+	timeoutSec := fs.Int("timeout", 20, "HTTP request timeout in seconds")
+	fs.Parse(args)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	store, err := storage.NewStore(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed opening database: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	fetcher := crawler.NewFetcher(crawler.FetcherConfig{
+		Timeout:      time.Duration(*timeoutSec) * time.Second,
+		MaxBodyBytes: 20 * 1024 * 1024,
+	})
+	available := feeds.All(fetcher)
+
+	failed := false
+	for _, name := range strings.Split(*source, ",") {
+		name = strings.TrimSpace(strings.ToLower(name))
+		if name == "" {
+			continue
+		}
+		feed, ok := available[name]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Unknown feed %q (available: %s)\n", name, strings.Join(feeds.Names(), ", "))
+			failed = true
+			continue
+		}
+
+		metas, err := feed.Fetch(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠️  %s: %v\n", name, err)
+			failed = true
+			continue
+		}
+
+		totalRoles, newRoles := 0, 0
+		for _, meta := range metas {
+			_, n, saveErr := store.SaveCompanyAndRoles(ctx, meta)
+			if saveErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  %s: saving %s: %v\n", name, meta.Name, saveErr)
+				continue
+			}
+			totalRoles += len(meta.OpenRoles)
+			newRoles += n
+		}
+		fmt.Printf("✅ %s: %d companies, %d matching roles (%d new)\n", name, len(metas), totalRoles, newRoles)
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
+
 func runLeads(args []string) {
 	if len(args) == 0 {
 		args = []string{"list"}
@@ -914,6 +978,7 @@ func printHelp() {
   ./specter leads list              View discovered technical leads
 
 🛠️ Standard Commands:
+  ./specter feeds [--source=remoteok,hn]   Ingest RemoteOK & Hacker News "Who is hiring?"
   ./specter scan [--target=<url>] [--github=<org>] [--force] [--sync-sheets]
   ./specter sync sheets [--target=all|leads|jobs] [--global-only] [--all] [--dry-run]
   ./specter apply [--global-only] [--fresh-only] [--domain=<domain>] [--export]
