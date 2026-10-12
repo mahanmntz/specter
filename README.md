@@ -288,6 +288,17 @@ Feeds map postings into the same database, so `apply`, `roles`, `export` and `sy
 
 Adding a source = one file in `internal/ats/` implementing `BoardAdapter`, plus a line in `NewRegistry`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Alerts & Scheduled Runs
+
+Set any of `SPECTER_WEBHOOK_URL` (generic JSON), `SPECTER_SLACK_WEBHOOK`, or `SPECTER_TELEGRAM_TOKEN` + `SPECTER_TELEGRAM_CHAT` in `.env`, then:
+
+```bash
+./specter scan --notify          # alert once after a scan
+./specter watch --every=6h       # re-scan forever, alert on new roles (Ctrl+C to stop)
+```
+
+Alerts rank new roles by worldwide-remote status, then by your profile match.
+
 ## Ethical Use & Privacy
 
 Specter works only with publicly available data, and **contributor lead mining is opt-in**:

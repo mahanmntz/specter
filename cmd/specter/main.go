@@ -20,6 +20,7 @@ import (
 	"specter/internal/crawler"
 	"specter/internal/exporter"
 	"specter/internal/feeds"
+	"specter/internal/notify"
 	"specter/internal/reporter"
 	"specter/internal/scanner"
 	"specter/internal/seeds"
@@ -32,6 +33,9 @@ import (
 )
 
 const version = "1.3.0"
+
+// nonInteractive suppresses prompts (set by unattended modes such as `watch`).
+var nonInteractive bool
 
 func main() {
 	// Auto-load .env configuration file if present
@@ -63,6 +67,8 @@ func main() {
 		runAutonomous(os.Args[2:])
 	case "scan":
 		runScan(os.Args[2:])
+	case "watch":
+		runWatch(os.Args[2:])
 	case "feeds":
 		runFeeds(os.Args[2:])
 	case "sync":
@@ -154,6 +160,7 @@ func runScan(args []string) {
 	forceRefresh := fs.Bool("force", false, "Force refresh and bypass crawler frontier deduplication cache")
 	syncSheets := fs.Bool("sync-sheets", false, "Automatically sync newly discovered leads & jobs to Google Sheets upon completion")
 	mineLeads := fs.Bool("mine-leads", os.Getenv("SPECTER_MINE_LEADS") == "1", "Opt in to mining public GitHub commit metadata for contributor leads/emails (off by default; see SECURITY.md)")
+	notifyFlag := fs.Bool("notify", false, "Send new-role alerts via configured webhook/Slack/Telegram (see .env.example)")
 	webhookURL := fs.String("webhook", "", "Custom Google Sheets webhook URL override")
 
 	fs.Parse(args)
@@ -395,6 +402,22 @@ func runScan(args []string) {
 		}
 	}
 
+	if *notifyFlag && len(freshRoles) > 0 {
+		notifiers := notify.FromEnv()
+		if len(notifiers) == 0 {
+			fmt.Fprintln(os.Stderr, "⚠️  --notify set but no SPECTER_WEBHOOK_URL / SPECTER_SLACK_WEBHOOK / SPECTER_TELEGRAM_* configured")
+		} else {
+			msg := notify.MessageFromRoles(freshRoles, signals.GetUserSkills(), 15)
+			nctx, ncancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if nErr := notify.SendAll(nctx, notifiers, msg); nErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠️  Notification error: %v\n", nErr)
+			} else {
+				fmt.Printf("🔔 Sent alert for %d new role(s) to %d channel(s)\n", len(freshRoles), len(notifiers))
+			}
+			ncancel()
+		}
+	}
+
 	var freshLeads []signals.EngineeringLead
 	for _, l := range allLeads {
 		if !l.DiscoveredAt.Before(startTime) {
@@ -424,7 +447,7 @@ func runScan(args []string) {
 
 	// Dispatch Google Sheets synchronization if requested or prompted interactively
 	shouldSync := *syncSheets
-	if !shouldSync && isInteractiveTerminal() {
+	if !shouldSync && !nonInteractive && isInteractiveTerminal() {
 		unsyncedLeads, _ := store.CountUnsyncedEngineeringLeads(context.Background())
 		unsyncedJobs := len(freshRoles)
 		if unsyncedLeads > 0 || unsyncedJobs > 0 {
@@ -535,6 +558,48 @@ func printCatalogSummary(store *storage.Store) {
 	}
 	fmt.Printf("\n✨ Dossiers, Direct Apply & Delta Reports saved in ./reports/latest/\n")
 	fmt.Printf("   Query direct-apply jobs: `specter apply --global-only`\n\n")
+}
+
+// runWatch repeats a scan on an interval, for unattended use (systemd, Docker, tmux).
+// Usage: specter watch [--every=6h] [scan flags...]; --notify is enabled by default.
+func runWatch(args []string) {
+	every := 6 * time.Hour
+	var scanArgs []string
+	hasNotify := false
+	for _, a := range args {
+		switch {
+		case strings.HasPrefix(a, "--every=") || strings.HasPrefix(a, "-every="):
+			d, err := time.ParseDuration(a[strings.Index(a, "=")+1:])
+			if err != nil || d < time.Minute {
+				fmt.Fprintf(os.Stderr, "Invalid --every %q (use a duration >= 1m, e.g. 6h)\n", a)
+				os.Exit(1)
+			}
+			every = d
+		default:
+			if strings.Contains(a, "notify") {
+				hasNotify = true
+			}
+			scanArgs = append(scanArgs, a)
+		}
+	}
+	if !hasNotify {
+		scanArgs = append(scanArgs, "--notify")
+	}
+	nonInteractive = true
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	for {
+		fmt.Printf("\n⏱️  [%s] watch: starting scan (next in %s)\n", time.Now().Format(time.RFC3339), every)
+		runScan(scanArgs)
+		select {
+		case <-ctx.Done():
+			fmt.Println("watch: stopped")
+			return
+		case <-time.After(every):
+		}
+	}
 }
 
 // runFeeds ingests multi-company job aggregators (RemoteOK, Hacker News "Who is hiring?").
@@ -978,6 +1043,7 @@ func printHelp() {
   ./specter leads list              View discovered technical leads
 
 🛠️ Standard Commands:
+  ./specter watch [--every=6h]             Re-scan on an interval and alert on new roles
   ./specter feeds [--source=remoteok,hn]   Ingest RemoteOK & Hacker News "Who is hiring?"
   ./specter scan [--target=<url>] [--github=<org>] [--force] [--sync-sheets]
   ./specter sync sheets [--target=all|leads|jobs] [--global-only] [--all] [--dry-run]
