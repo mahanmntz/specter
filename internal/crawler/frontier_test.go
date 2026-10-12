@@ -173,4 +173,3 @@ func TestFrontier_ConditionalHeadersAnd304(t *testing.T) {
 		t.Fatalf("headers should persist after 304, got etag=%s, lm=%s", etag, lm)
 	}
 }
-

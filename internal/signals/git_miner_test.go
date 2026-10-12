@@ -164,4 +164,3 @@ func TestClassifyBackendArchetype(t *testing.T) {
 		t.Errorf("expected Infrastructure Engineer, got %s", role3)
 	}
 }
-

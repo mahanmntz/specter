@@ -368,5 +368,3 @@ func TestSheetsSyncTracking(t *testing.T) {
 		t.Fatalf("expected count 1, got %d", count)
 	}
 }
-
-

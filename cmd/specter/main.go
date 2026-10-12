@@ -970,4 +970,3 @@ func isInteractiveTerminal() bool {
 	}
 	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }
-

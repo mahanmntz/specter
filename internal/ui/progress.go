@@ -13,20 +13,20 @@ import (
 
 // ProgressTracker maintains live recon metrics and renders a dynamic terminal line.
 type ProgressTracker struct {
-	out             io.Writer
-	ticker          *time.Ticker
-	stopCh          chan struct{}
-	wg              sync.WaitGroup
-	mu              sync.Mutex
-	active          bool
+	out    io.Writer
+	ticker *time.Ticker
+	stopCh chan struct{}
+	wg     sync.WaitGroup
+	mu     sync.Mutex
+	active bool
 
-	startTime       time.Time
-	activeWorkers   atomic.Int32
-	targetsCrawled  atomic.Int64
-	targetsTotal    atomic.Int64
-	leadsFound      atomic.Int64
-	emailsCaptured  atomic.Int64
-	requestCount    atomic.Int64
+	startTime      time.Time
+	activeWorkers  atomic.Int32
+	targetsCrawled atomic.Int64
+	targetsTotal   atomic.Int64
+	leadsFound     atomic.Int64
+	emailsCaptured atomic.Int64
+	requestCount   atomic.Int64
 
 	currentTarget   string
 	rateLimitStatus string

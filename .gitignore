@@ -28,3 +28,7 @@ reports/latest
 
 # Environment variables
 .env
+
+# Generated reports may contain personal data
+reports/*.md
+!reports/.gitkeep

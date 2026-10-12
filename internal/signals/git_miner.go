@@ -676,12 +676,12 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 			PersonalScore:   personalScore,
 			PersonalMatches: personalMatches,
 			DiscoveredAt:    time.Now().UTC(),
-			Contacted:      false,
-			RepoName:       agg.RepoName,
-			RepoURL:        agg.RepoURL,
-			CommitSHA:      agg.CommitSHA,
-			CommitURL:      agg.CommitURL,
-			MatchedSignals: matchedSignals,
+			Contacted:       false,
+			RepoName:        agg.RepoName,
+			RepoURL:         agg.RepoURL,
+			CommitSHA:       agg.CommitSHA,
+			CommitURL:       agg.CommitURL,
+			MatchedSignals:  matchedSignals,
 		}
 
 		leads = append(leads, lead)

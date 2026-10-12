@@ -75,7 +75,7 @@ type SyncOptions struct {
 	All        bool   // Push all records regardless of previously synced status
 	Limit      int
 	DryRun     bool
-	GlobalOnly bool   // For jobs: only sync global/contractor-friendly roles
+	GlobalOnly bool // For jobs: only sync global/contractor-friendly roles
 	LogFunc    func(format string, args ...any)
 }
 

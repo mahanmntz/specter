@@ -1001,4 +1001,3 @@ func parseSQLiteTime(val any) time.Time {
 	}
 	return time.Time{}
 }
-

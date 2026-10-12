@@ -17,10 +17,10 @@ import (
 
 // ExportBundle contains full scanned datasets for export.
 type ExportBundle struct {
-	Companies        []ats.CompanyMeta        `json:"companies"`
-	Roles            []ats.JobPosting         `json:"roles"`
+	Companies        []ats.CompanyMeta         `json:"companies"`
+	Roles            []ats.JobPosting          `json:"roles"`
 	EngineeringLeads []signals.EngineeringLead `json:"engineering_leads"`
-	Leads            []signals.Lead           `json:"leads"`
+	Leads            []signals.Lead            `json:"leads"`
 }
 
 // Export dumps the database records into stdout or a designated file in JSON or CSV.
