@@ -119,6 +119,8 @@ type GitMiner struct {
 	profileCache sync.Map // map[string]*ghUserProfile
 	yieldStats   map[string]*RepoYieldStats
 	statsMu      sync.Mutex
+	apiBase      string // GitHub REST API root (overridable in tests)
+	webBase      string // github.com web root, used for patch downloads and links
 }
 
 // NewGitMiner creates a configured GitMiner.
@@ -171,6 +173,8 @@ func NewGitMiner(f *crawler.Fetcher, opts GitMinerOptions) *GitMiner {
 		throttler:  crawler.NewHostThrottler(opts.PolitenessDelay),
 		rotator:    NewTokenRotator(toks),
 		yieldStats: make(map[string]*RepoYieldStats),
+		apiBase:    "https://api.github.com",
+		webBase:    "https://github.com",
 	}
 }
 
@@ -283,7 +287,7 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 	}
 
 	// 1. Fetch public repositories
-	reposAPI := fmt.Sprintf("https://api.github.com/orgs/%s/repos?type=public&sort=pushed&per_page=%d", org, m.opts.MaxRepos)
+	reposAPI := fmt.Sprintf(m.apiBase+"/orgs/%s/repos?type=public&sort=pushed&per_page=%d", org, m.opts.MaxRepos)
 	if err := m.throttler.Wait(ctx, reposAPI); err != nil {
 		return nil, err
 	}
@@ -370,9 +374,9 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 		}
 
 		repoFullName := fmt.Sprintf("%s/%s", org, repo.Name)
-		repoWebURL := fmt.Sprintf("https://github.com/%s/%s", org, repo.Name)
+		repoWebURL := fmt.Sprintf(m.webBase+"/%s/%s", org, repo.Name)
 
-		commitsAPI := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits?per_page=%d", org, repo.Name, m.opts.MaxCommitsRepo)
+		commitsAPI := fmt.Sprintf(m.apiBase+"/repos/%s/%s/commits?per_page=%d", org, repo.Name, m.opts.MaxCommitsRepo)
 		if err := m.throttler.Wait(ctx, commitsAPI); err != nil {
 			return nil, err
 		}
@@ -423,8 +427,14 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 				ghHandle = c.Author.Login
 			}
 
-			// Immediate Bot / CI gate before any work
-			if IsBotOrCI(name, ghHandle, email) {
+			// Immediate Bot / CI gate before any work. GitHub-masked addresses are not a bot
+			// signal on their own (the patch header may reveal the real email below), so
+			// judge those by name/handle only.
+			gateEmail := email
+			if strings.Contains(email, "users.noreply.github.com") {
+				gateEmail = ""
+			}
+			if IsBotOrCI(name, ghHandle, gateEmail) {
 				continue
 			}
 
@@ -457,7 +467,7 @@ func (m *GitMiner) MineOrganization(ctx context.Context, org string, companyDoma
 			if !exists {
 				commitWebURL := ""
 				if c.SHA != "" {
-					commitWebURL = fmt.Sprintf("https://github.com/%s/%s/commit/%s", org, repo.Name, c.SHA)
+					commitWebURL = fmt.Sprintf(m.webBase+"/%s/%s/commit/%s", org, repo.Name, c.SHA)
 				}
 
 				agg = &ContributorAggregation{

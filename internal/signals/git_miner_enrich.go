@@ -33,7 +33,7 @@ func (m *GitMiner) enrichLeadProfile(ctx context.Context, lead *EngineeringLead,
 	if val, ok := m.profileCache.Load(handle); ok {
 		profile = val.(*ghUserProfile)
 	} else {
-		userAPI := fmt.Sprintf("https://api.github.com/users/%s", handle)
+		userAPI := fmt.Sprintf(m.apiBase+"/users/%s", handle)
 		res, err := m.fetcher.FetchWithHeaders(ctx, userAPI, m.authHeaders())
 		if err == nil && res.StatusCode == http.StatusOK {
 			var p ghUserProfile
@@ -59,7 +59,7 @@ func (m *GitMiner) enrichLeadProfile(ctx context.Context, lead *EngineeringLead,
 
 	// 2. Query GitHub social accounts API: /users/{username}/social_accounts
 	if lead.LinkedInURL == "" && handle != "" {
-		socialAPI := fmt.Sprintf("https://api.github.com/users/%s/social_accounts", handle)
+		socialAPI := fmt.Sprintf(m.apiBase+"/users/%s/social_accounts", handle)
 		if sRes, sErr := m.fetcher.FetchWithHeaders(ctx, socialAPI, m.authHeaders()); sErr == nil && sRes.StatusCode == http.StatusOK {
 			type socialAccount struct {
 				Provider string `json:"provider"`
@@ -100,7 +100,7 @@ func generateOSINTLinkedIn(name, companyName, domain string) string {
 
 // extractFromPatch fetches the commit patch to extract the raw From: header email.
 func (m *GitMiner) extractFromPatch(ctx context.Context, org, repo, sha string, headers map[string]string) (string, string) {
-	patchURL := fmt.Sprintf("https://github.com/%s/%s/commit/%s.patch", org, repo, sha)
+	patchURL := fmt.Sprintf(m.webBase+"/%s/%s/commit/%s.patch", org, repo, sha)
 	patchHeaders := make(map[string]string)
 	for k, v := range headers {
 		patchHeaders[k] = v
