@@ -454,24 +454,41 @@ func runScan(args []string) {
 func detectATSTypeAndBoard(target string) (string, string) {
 	lower := strings.ToLower(target)
 	parts := strings.Split(strings.Trim(target, "/"), "/")
+	last := target
+	if len(parts) > 1 {
+		last = parts[len(parts)-1]
+	}
 
-	if strings.Contains(lower, "greenhouse.io") {
+	switch {
+	case strings.Contains(lower, "greenhouse.io"):
+		return "greenhouse", last
+	case strings.Contains(lower, "lever.co"):
+		return "lever", last
+	case strings.Contains(lower, "ashbyhq.com"):
+		return "ashby", last
+	case strings.Contains(lower, "workable.com"):
+		// apply.workable.com/<account>[/...]: the account is the first path segment.
 		if len(parts) > 1 {
-			return "greenhouse", parts[len(parts)-1]
+			for i, p := range parts {
+				if strings.Contains(strings.ToLower(p), "workable.com") && i+1 < len(parts) {
+					return "workable", parts[i+1]
+				}
+			}
 		}
-		return "greenhouse", target
-	}
-	if strings.Contains(lower, "lever.co") {
-		if len(parts) > 1 {
-			return "lever", parts[len(parts)-1]
+		return "workable", target
+	case strings.Contains(lower, "smartrecruiters.com"):
+		for i, p := range parts {
+			if strings.Contains(strings.ToLower(p), "smartrecruiters.com") && i+1 < len(parts) {
+				return "smartrecruiters", parts[i+1]
+			}
 		}
-		return "lever", target
-	}
-	if strings.Contains(lower, "ashbyhq.com") {
-		if len(parts) > 1 {
-			return "ashby", parts[len(parts)-1]
+		return "smartrecruiters", target
+	case strings.Contains(lower, "recruitee.com"):
+		host := strings.TrimPrefix(strings.TrimPrefix(lower, "https://"), "http://")
+		if i := strings.Index(host, ".recruitee.com"); i > 0 {
+			return "recruitee", host[:i]
 		}
-		return "ashby", target
+		return "recruitee", target
 	}
 	return "generic", target
 }

@@ -192,6 +192,12 @@ func SeedAPIURL(seed seeds.SeedTarget) string {
 		return fmt.Sprintf("https://api.lever.co/v0/postings/%s", seed.ATSBoardID)
 	case "ashby":
 		return fmt.Sprintf("https://api.ashbyhq.com/posting-api/job-board/%s", seed.ATSBoardID)
+	case "workable":
+		return fmt.Sprintf("https://apply.workable.com/api/v1/widget/accounts/%s", seed.ATSBoardID)
+	case "smartrecruiters":
+		return fmt.Sprintf("https://api.smartrecruiters.com/v1/companies/%s/postings", seed.ATSBoardID)
+	case "recruitee":
+		return fmt.Sprintf("https://%s.recruitee.com/api/offers/", seed.ATSBoardID)
 	default:
 		return "https://" + seed.Domain
 	}

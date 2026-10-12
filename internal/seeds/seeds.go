@@ -15,7 +15,7 @@ type SeedTarget struct {
 	Name       string `json:"name"`
 	Domain     string `json:"domain"`
 	GitHubOrg  string `json:"github_org"`
-	ATSService string `json:"ats_service"`  // "greenhouse", "lever", "ashby", "generic"
+	ATSService string `json:"ats_service"`  // "greenhouse", "lever", "ashby", "workable", "smartrecruiters", "recruitee", "generic"
 	ATSBoardID string `json:"ats_board_id"` // e.g., "hashicorp", "grafanalabs"
 	Priority   int    `json:"priority"`     // 1 (high), 2 (medium)
 }

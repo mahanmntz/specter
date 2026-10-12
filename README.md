@@ -265,6 +265,20 @@ Edit `.env` to configure your environment variables:
 
 ---
 
+## Supported Job Sources
+
+| ATS | `ats_service` | Example target |
+|---|---|---|
+| Greenhouse | `greenhouse` | `boards.greenhouse.io/stripe` |
+| Lever | `lever` | `jobs.lever.co/acme` |
+| Ashby | `ashby` | `jobs.ashbyhq.com/acme` |
+| Workable | `workable` | `apply.workable.com/acme` |
+| SmartRecruiters | `smartrecruiters` | `careers.smartrecruiters.com/Acme` |
+| Recruitee | `recruitee` | `acme.recruitee.com` |
+| Any other site | `generic` | `example.com` (DOM crawler) |
+
+Adding a source = one file in `internal/ats/` implementing `BoardAdapter`, plus a line in `NewRegistry`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Ethical Use & Privacy
 
 Specter works only with publicly available data, and **contributor lead mining is opt-in**:
