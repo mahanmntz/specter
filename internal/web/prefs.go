@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mahanmntz/specter/internal/ghprofile"
 	"github.com/mahanmntz/specter/internal/signals"
 )
 
@@ -13,6 +14,9 @@ const prefsKey = "prefs"
 
 // Prefs are the user's saved search preferences.
 type Prefs struct {
+	Name          string   `json:"name,omitempty"`
+	GitHub        string   `json:"github,omitempty"`
+	Avatar        string   `json:"avatar,omitempty"` // data: URL saved at import time
 	Role          string   `json:"role"`
 	Skills        []string `json:"skills"`
 	Seniority     []string `json:"seniority"`
@@ -25,6 +29,22 @@ func (p *Prefs) normalize() error {
 	p.Role = strings.ToLower(strings.TrimSpace(p.Role))
 	if _, ok := signals.PresetByID(p.Role); !ok {
 		return fmt.Errorf("unknown role %q", p.Role)
+	}
+	p.Name = strings.TrimSpace(p.Name)
+	if len(p.Name) > 80 {
+		p.Name = p.Name[:80]
+	}
+	p.GitHub = strings.TrimSpace(p.GitHub)
+	if p.GitHub != "" {
+		login, err := ghprofile.ParseLogin(p.GitHub)
+		if err != nil {
+			return fmt.Errorf("invalid GitHub username")
+		}
+		p.GitHub = login
+	}
+	// Only keep an avatar we saved ourselves: a small image data URL.
+	if !strings.HasPrefix(p.Avatar, "data:image/") || len(p.Avatar) > 400<<10 {
+		p.Avatar = ""
 	}
 	p.Skills = cleanStrings(p.Skills, 30, 40)
 	p.Seniority = cleanStrings(p.Seniority, 6, 40)

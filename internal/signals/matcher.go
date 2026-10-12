@@ -222,7 +222,13 @@ func CalculateSkillMatch(targetText string, userSkills []string) (int, []string)
 			matches = strings.Contains(textLower, "ci/cd") || strings.Contains(textLower, "ci-cd") ||
 				strings.Contains(textLower, "github actions") || strings.Contains(textLower, "gitlab ci")
 		default:
-			matches = strings.Contains(textLower, sLower)
+			// Word-boundary match so short names ("C", "Java") do not match inside other words.
+			matches = containsTerm(targetText, sLower)
+			if !matches {
+				if canon, ok := CanonicalSkill(skill); ok && !strings.EqualFold(canon, skill) {
+					matches = containsTerm(targetText, canon)
+				}
+			}
 		}
 
 		if matches && !seen[sLower] {

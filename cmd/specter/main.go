@@ -24,6 +24,7 @@ import (
 	"github.com/mahanmntz/specter/internal/crawler"
 	"github.com/mahanmntz/specter/internal/exporter"
 	"github.com/mahanmntz/specter/internal/feeds"
+	"github.com/mahanmntz/specter/internal/ghprofile"
 	"github.com/mahanmntz/specter/internal/notify"
 	"github.com/mahanmntz/specter/internal/reporter"
 	"github.com/mahanmntz/specter/internal/runner"
@@ -608,6 +609,7 @@ func runServe(args []string) {
 
 	webSrv := web.New(store, web.Options{
 		Skills: signals.GetUserSkills(),
+		GitHub: ghprofile.NewClient(),
 		Run: func(ctx context.Context, opts runner.Options, prog *web.Progress) (runner.Result, error) {
 			return runner.Run(ctx, store, opts, prog)
 		},

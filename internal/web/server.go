@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ghprofile"
 	"github.com/mahanmntz/specter/internal/seeds"
 	"github.com/mahanmntz/specter/internal/signals"
 	"github.com/mahanmntz/specter/internal/storage"
@@ -35,12 +36,20 @@ type Source interface {
 	SetSetting(ctx context.Context, key, value string) error
 }
 
+// GitHubAnalyzer reads a public GitHub profile.
+type GitHubAnalyzer interface {
+	Analyze(ctx context.Context, login string) (*ghprofile.Result, error)
+	AvatarDataURL(ctx context.Context, avatarURL string) (string, error)
+}
+
 // Options configures a Server.
 type Options struct {
 	// Skills used for match scores until the user saves a profile.
 	Skills []string
 	// Run performs a discovery pass; nil disables the Find-jobs button.
 	Run RunFunc
+	// GitHub reads public GitHub profiles for onboarding; nil disables import.
+	GitHub GitHubAnalyzer
 	// Seeds returns the company catalog to scan; defaults to the embedded catalog.
 	Seeds func() ([]seeds.SeedTarget, error)
 }
@@ -83,6 +92,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/profile", s.handleGetProfile)
 	mux.HandleFunc("PUT /api/profile", s.handlePutProfile)
+	mux.HandleFunc("POST /api/github/import", s.handleGitHubImport)
 	mux.HandleFunc("GET /api/run", s.handleRunStatus)
 	mux.HandleFunc("POST /api/run", s.handleRunStart)
 	mux.HandleFunc("POST /api/run/cancel", s.handleRunCancel)
