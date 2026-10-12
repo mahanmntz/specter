@@ -156,6 +156,9 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, ghprofile.ErrRateLimited):
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
 		return
+	case errors.Is(err, ghprofile.ErrUnreachable):
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
 	case err != nil:
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return

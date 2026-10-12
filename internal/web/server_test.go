@@ -191,13 +191,14 @@ func TestFacets(t *testing.T) {
 	rec := get(t, s.Handler(), "/api/facets")
 	var f struct {
 		Total, Global, Contractor, Companies int
+		NewWeek                              int `json:"new_week"`
 		Seniority, Keywords                  []facetCount
 		LastRun                              string `json:"last_run"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &f); err != nil {
 		t.Fatal(err)
 	}
-	if f.Total != 3 || f.Global != 1 || f.Contractor != 2 || f.Companies != 3 || len(f.Seniority) != 3 || f.LastRun == "" {
+	if f.Total != 3 || f.Global != 1 || f.Contractor != 2 || f.Companies != 3 || f.NewWeek != 2 || len(f.Seniority) != 3 || f.LastRun == "" {
 		t.Errorf("facets = %+v", f)
 	}
 	if f.Keywords[0].Name != "go" || f.Keywords[0].Count != 2 {

@@ -1,6 +1,7 @@
 package signals
 
 import (
+	"math"
 	"regexp"
 	"strings"
 	"sync"
@@ -151,12 +152,13 @@ var roleSignatures = map[string][]string{
 }
 
 // RoleScores scores every preset against weighted skills (skill name -> weight).
+// Weights are square-rooted so breadth across a role's skills beats sheer volume in one language.
 func RoleScores(weights map[string]float64) map[string]float64 {
 	out := make(map[string]float64, len(roleSignatures))
 	for role, sigs := range roleSignatures {
 		total := 0.0
 		for _, s := range sigs {
-			total += weights[s]
+			total += math.Sqrt(weights[s])
 		}
 		out[role] = total
 	}

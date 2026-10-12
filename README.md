@@ -271,20 +271,20 @@ Edit `.env` to configure your environment variables:
 ./specter serve --open
 ```
 
-First launch asks what kind of work you want: pick a role (Backend, Full-stack, Frontend, DevOps/SRE, Data, ML/AI, Mobile), tweak your skills, and press **Find my jobs**. Specter searches the company catalog plus RemoteOK and Hacker News in the background, with live progress, and fills the page as it goes. Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
+**First run:** enter your name and GitHub username. Specter reads your public repositories on your own machine, works out your role (Backend, Full-stack, Frontend, DevOps/SRE, Data, ML/AI, Mobile) and the skills you actually use, and shows them as tappable chips. Adjust anything (pick from the skill catalog or add your own), then press **Find my jobs**. No GitHub account? Skip that step and pick a role manually.
 
-![Specter web UI](docs/ui.png)
+Specter then searches its company catalog plus RemoteOK and Hacker News in the background, with live progress, and fills the page as results arrive. Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
 
-- **Filters:** worldwide remote, contractor-friendly, posted-within, level, tech stack, company, minimum skill match; filters live in the URL so searches can be bookmarked. Press `/` to search.
+| Light | Dark |
+|---|---|
+| ![Light theme](docs/ui.png) | ![Dark theme](docs/ui-dark.png) |
+
+- **Light & dark themes**, following your system by default; the header button cycles system → light → dark.
+- **Filters:** worldwide remote, contractor-friendly, posted-within, level, tech stack, company, minimum skill match. Filters live in the URL, so searches can be bookmarked.
+- **Job details:** click a job for a side panel showing which of *your* skills match and what else the posting mentions.
 - **Triage:** Save, mark Applied, or Hide jobs (kept only in your local database), then click **Apply** to open the job's own application page.
-- **Personalized:** your role and skills decide which postings are kept and how each job is scored ("80% match").
-- **Private:** runs entirely on your machine, binds to loopback only, has no accounts or telemetry, and refuses other addresses unless you pass `--allow-remote` (it has no authentication).
-
-<details><summary>First-run setup</summary>
-
-![Setup](docs/setup.png)
-
-</details>
+- **Keyboard:** `/` search, `j`/`k` move, `Enter` details, `Esc` close.
+- **Private:** runs entirely on your machine, binds to loopback only, has no accounts or telemetry, and loads nothing from third parties (your GitHub avatar is saved locally during import). It refuses other addresses unless you pass `--allow-remote` (it has no authentication).
 
 ## Supported Job Sources
 

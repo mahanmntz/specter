@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>Specter</title>
+  <script src="theme.js"></script>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,12 +17,13 @@
         <input id="q" type="search" placeholder="Search jobs" autocomplete="off" aria-label="Search jobs">
         <kbd>/</kbd>
       </label>
-      <button id="profile-chip" class="chip-btn" title="Edit your profile"></button>
+      <button id="theme" class="icon-btn" aria-label="Change theme" title="Theme"></button>
+      <button id="profile-chip" class="chip-btn" title="Edit your profile" hidden></button>
       <div class="run-group">
         <button id="run" class="primary">Find jobs</button>
         <button id="run-menu-btn" class="primary caret" aria-label="Scan depth" aria-haspopup="true">▾</button>
         <div id="run-menu" class="menu" hidden>
-          <button data-mode="quick"><b>Quick scan</b><span>Top 25 companies · ~1 min</span></button>
+          <button data-mode="quick"><b>Quick scan</b><span>Top 25 companies · about a minute</span></button>
           <button data-mode="full"><b>Full scan</b><span>All companies · a few minutes</span></button>
         </div>
       </div>
@@ -33,6 +35,12 @@
   </header>
 
   <main class="wrap">
+    <section class="hero" id="hero" hidden>
+      <h1 id="greeting"></h1>
+      <p id="subgreeting" class="muted"></p>
+      <div id="stats" class="stats"></div>
+    </section>
+
     <section class="filters" aria-label="Filters">
       <div class="pills">
         <button id="global" class="pill" aria-pressed="false">🌍 Worldwide</button>
@@ -81,8 +89,12 @@
     <div id="list" class="list"></div>
     <button id="loadmore" class="more-btn" hidden>Show more</button>
     <div id="empty" class="empty" hidden></div>
+
+    <footer class="foot">Specter runs on your computer. Your profile and job list never leave it. <span class="kbds"><kbd>/</kbd> search <kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> details</span></footer>
   </main>
 
+  <div id="scrim" class="scrim" hidden></div>
+  <aside id="drawer" class="drawer" hidden aria-label="Job details"></aside>
   <dialog id="setup" aria-labelledby="setup-title"></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 

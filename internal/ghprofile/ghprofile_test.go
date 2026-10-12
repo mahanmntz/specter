@@ -188,3 +188,21 @@ func TestAvatarDataURL(t *testing.T) {
 		}
 	}
 }
+
+func TestAnalyzeRetriesOnceThenReportsUnreachable(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		hj, _ := w.(http.Hijacker)
+		conn, _, _ := hj.Hijack()
+		conn.Close() // simulate a connection reset
+	}))
+	defer srv.Close()
+	c := &Client{HTTP: srv.Client(), BaseURL: srv.URL}
+	if _, err := c.Analyze(context.Background(), "octocat"); !errors.Is(err, ErrUnreachable) {
+		t.Errorf("err = %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("expected exactly one retry, got %d calls", calls)
+	}
+}

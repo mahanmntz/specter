@@ -26,6 +26,7 @@ import (
 var (
 	ErrInvalidLogin = errors.New("that doesn't look like a GitHub username")
 	ErrNotFound     = errors.New("GitHub user not found")
+	ErrUnreachable  = errors.New("couldn't reach GitHub; check your connection and try again")
 	ErrRateLimited  = errors.New("GitHub rate limit reached; try again in a few minutes (or set GITHUB_TOKEN)")
 )
 
@@ -129,8 +130,16 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		client = http.DefaultClient
 	}
 	resp, err := client.Do(req)
+	if err != nil && ctx.Err() == nil {
+		// One quick retry: transient connection resets are common on flaky networks.
+		select {
+		case <-time.After(400 * time.Millisecond):
+		case <-ctx.Done():
+		}
+		resp, err = client.Do(req.Clone(ctx))
+	}
 	if err != nil {
-		return fmt.Errorf("could not reach GitHub: %w", err)
+		return ErrUnreachable
 	}
 	defer resp.Body.Close()
 	switch {

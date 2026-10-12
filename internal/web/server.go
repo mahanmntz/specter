@@ -116,7 +116,7 @@ func guard(next http.Handler) http.Handler {
 			return
 		}
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; base-uri 'none'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -360,7 +360,8 @@ func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
 	sen := map[string]int{}
 	kw := map[string]int{}
 	statuses := map[string]int{}
-	global, contractor, companies := 0, 0, map[string]bool{}
+	global, contractor, newWeek, companies := 0, 0, 0, map[string]bool{}
+	now := s.now()
 	for _, j := range all {
 		if j.Status != "" {
 			statuses[j.Status]++
@@ -378,12 +379,16 @@ func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
 		if j.Contractor {
 			contractor++
 		}
+		if !j.FirstSeen.IsZero() && now.Sub(j.FirstSeen) <= 7*24*time.Hour {
+			newWeek++
+		}
 		companies[j.Domain] = true
 	}
 	out := map[string]any{
 		"total":      len(all),
 		"global":     global,
 		"contractor": contractor,
+		"new_week":   newWeek,
 		"companies":  len(companies),
 		"seniority":  topCounts(sen, 0),
 		"keywords":   topCounts(kw, 30),
