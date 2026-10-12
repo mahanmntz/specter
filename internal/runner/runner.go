@@ -12,12 +12,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"specter/internal/ats"
-	"specter/internal/crawler"
-	"specter/internal/feeds"
-	"specter/internal/scanner"
-	"specter/internal/seeds"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/feeds"
+	"github.com/mahanmntz/specter/internal/scanner"
+	"github.com/mahanmntz/specter/internal/seeds"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 // Options controls one discovery pass.

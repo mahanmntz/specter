@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 // Airtable upserts jobs into a table, merging on the "ID" field.

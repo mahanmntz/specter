@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 func jobs(n int) []ats.JobPosting {

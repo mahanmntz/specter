@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 var sample = Message{Title: "2 new roles", Roles: []Role{

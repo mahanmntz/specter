@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 type fakeSource struct {

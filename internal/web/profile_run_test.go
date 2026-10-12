@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/runner"
-	"specter/internal/seeds"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/runner"
+	"github.com/mahanmntz/specter/internal/seeds"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 // restoreProfile puts the process-wide matcher back to the backend defaults after a test.

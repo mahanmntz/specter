@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/signals"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 // GenerateDeltaReport compares the current run against the preceding crawl run,

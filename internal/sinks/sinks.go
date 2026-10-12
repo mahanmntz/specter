@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 // Sink is a destination that accepts job postings.

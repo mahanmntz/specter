@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // SmartRecruitersAdapter reads the public SmartRecruiters postings API.

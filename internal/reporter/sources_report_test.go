@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/signals"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 func TestGenerateSourcesReport(t *testing.T) {

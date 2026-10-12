@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 // Notion creates one page per job in a database, skipping roles already present.

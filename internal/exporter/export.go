@@ -10,9 +10,9 @@ import (
 	"strconv"
 	"strings"
 
-	"specter/internal/ats"
-	"specter/internal/signals"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 // ExportBundle contains full scanned datasets for export.

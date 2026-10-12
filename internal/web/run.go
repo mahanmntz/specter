@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"specter/internal/runner"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/runner"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 // RunFunc performs one discovery pass; the web UI's "Find jobs" button calls it.

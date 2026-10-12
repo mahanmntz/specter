@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/signals"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 // GenerateSourcesReport produces an aggregated source analytics and lead yield report at outDir/sources_analytics_{date}.md.

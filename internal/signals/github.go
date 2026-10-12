@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // Lead represents a discovered engineering candidate, contributor, or technical contact.

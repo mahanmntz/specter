@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 func TestExportRolesCSV(t *testing.T) {

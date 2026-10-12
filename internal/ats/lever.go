@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/crawler"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 type LeverAdapter struct {

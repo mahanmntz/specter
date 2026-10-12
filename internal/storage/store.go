@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/signals"
 
 	_ "modernc.org/sqlite"
 )

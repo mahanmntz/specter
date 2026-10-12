@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // RemoteOK reads the public RemoteOK JSON API.

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 const prefsKey = "prefs"

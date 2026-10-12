@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/signals"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 // GenerateMarkdownReport produces an executive technical dossier at outDir/{domain}_leads_{date}.md.

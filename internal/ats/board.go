@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 // BoardAdapter is an ATS adapter that can be queried directly with a board/company ID.

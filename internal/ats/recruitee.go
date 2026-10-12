@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // RecruiteeAdapter reads public Recruitee career sites (<company>.recruitee.com).

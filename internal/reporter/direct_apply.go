@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 // GenerateDirectApplyReport builds a Markdown dashboard dedicated to one-click applications.

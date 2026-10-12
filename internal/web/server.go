@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/seeds"
-	"specter/internal/signals"
-	"specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/seeds"
+	"github.com/mahanmntz/specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/storage"
 )
 
 //go:embed static

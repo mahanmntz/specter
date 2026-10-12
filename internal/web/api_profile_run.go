@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"time"
 
-	"specter/internal/feeds"
-	"specter/internal/runner"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/feeds"
+	"github.com/mahanmntz/specter/internal/runner"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 type presetView struct {

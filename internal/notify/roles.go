@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"specter/internal/ats"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 // MessageFromRoles builds an alert from new postings, ranked by global-remote

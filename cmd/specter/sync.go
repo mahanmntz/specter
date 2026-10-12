@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"specter/internal/sinks"
-	"specter/internal/storage"
-	"specter/internal/sync"
+	"github.com/mahanmntz/specter/internal/sinks"
+	"github.com/mahanmntz/specter/internal/storage"
+	"github.com/mahanmntz/specter/internal/sync"
 )
 
 func runSync(args []string) {

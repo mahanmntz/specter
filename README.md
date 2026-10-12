@@ -1,6 +1,6 @@
 # Specter ⚡
 
-**Specter** is a high-performance, autonomous CLI reconnaissance and engineering lead discovery engine written in pure Go (1.27+). Designed for engineering leaders, technical recruiters, founders, and global remote software engineers, Specter discovers high-signal backend hiring indicators, maps public ATS boards (Greenhouse, Lever, Ashby, direct portals), detects **worldwide contractor-friendly (sanction-resilient) positions with deep one-click application links**, mines public Git commit metadata and patch headers for verified contact emails, enforces provenance lineage, and produces date-stamped execution archives with delta tracking.
+**Specter** is a high-performance, autonomous CLI reconnaissance and engineering lead discovery engine written in pure Go (1.26+). Designed for engineering leaders, technical recruiters, founders, and global remote software engineers, Specter discovers high-signal backend hiring indicators, maps public ATS boards (Greenhouse, Lever, Ashby, direct portals), detects **worldwide contractor-friendly (sanction-resilient) positions with deep one-click application links**, mines public Git commit metadata and patch headers for verified contact emails, enforces provenance lineage, and produces date-stamped execution archives with delta tracking.
 
 ---
 
@@ -311,25 +311,23 @@ Adding a source = one file in `internal/ats/` implementing `BoardAdapter`, plus 
 
 ## Install
 
-```bash
-# From source
-git clone https://github.com/mahanmntz/specter && cd specter && go build ./cmd/specter
+Specter is a single self-contained binary: no database server, no Node, no C compiler, no browser extension. The web UI is embedded in the binary.
 
-# Docker
+**Option A: prebuilt binary (nothing to install).** Download the archive for your OS from the [releases page](https://github.com/mahanmntz/specter/releases), unpack, and run `./specter serve --open`.
+
+**Option B: with Go** (1.26+; older Go versions fetch the right toolchain automatically):
+
+```bash
+go install github.com/mahanmntz/specter/cmd/specter@latest
+specter serve --open
+```
+
+**Option C: Docker**
+
+```bash
 docker build -t specter .
-docker run --rm -v "$PWD/data:/data" --env-file .env specter watch --every=6h
+docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD/data:/data" specter serve --addr 0.0.0.0:8080 --allow-remote --db /data/specter.db
 ```
-
-Prebuilt binaries for Linux, macOS and Windows are attached to each [GitHub release](https://github.com/mahanmntz/specter/releases).
-
-## Airtable & Notion
-
-```bash
-./specter sync airtable --global-only    # needs AIRTABLE_TOKEN, AIRTABLE_BASE
-./specter sync notion --fresh-only       # needs NOTION_TOKEN, NOTION_DATABASE_ID
-```
-
-Pushes are idempotent (keyed by role ID). Create these fields first: **Airtable** table `Jobs` with `ID`, `Title`, `Company`, `Location`, `Department`, `Seniority`, `Remote`, `Keywords`, `URL`, `Posted` (text/URL/date). **Notion** database with `Name` (title), `ID`, `Company`, `Location`, `Remote`, `Keywords` (text) and `URL` (url), shared with your integration.
 
 ## Alerts & Scheduled Runs
 

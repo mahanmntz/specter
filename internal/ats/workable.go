@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // WorkableAdapter reads public Workable job boards (apply.workable.com/<account>).

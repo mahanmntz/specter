@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/scanner"
-	"specter/internal/seeds"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/scanner"
+	"github.com/mahanmntz/specter/internal/seeds"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 type ingester struct {

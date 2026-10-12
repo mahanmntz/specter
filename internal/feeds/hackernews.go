@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // HackerNews reads the latest monthly "Ask HN: Who is hiring?" thread via the Algolia API.

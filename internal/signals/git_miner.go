@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // EngineeringLead represents an engineering lead / technical contributor discovered via Git recon.

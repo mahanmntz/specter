@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"specter/internal/crawler"
-	"specter/internal/seeds"
+	"github.com/mahanmntz/specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/seeds"
 )
 
 // Registry manages and dispatches to ATS adapters.

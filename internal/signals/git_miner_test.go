@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 func TestIsValidOutreachEmail(t *testing.T) {

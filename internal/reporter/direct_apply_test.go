@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/ats"
 )
 
 func TestGenerateDirectApplyReport(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"specter/internal/ats"
-	"specter/internal/seeds"
-	"specter/internal/signals"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/seeds"
+	"github.com/mahanmntz/specter/internal/signals"
 )
 
 // Ingester fetches a company's open roles from its ATS.

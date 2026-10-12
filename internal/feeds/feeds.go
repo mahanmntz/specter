@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"specter/internal/ats"
-	"specter/internal/crawler"
+	"github.com/mahanmntz/specter/internal/ats"
+	"github.com/mahanmntz/specter/internal/crawler"
 )
 
 // Feed is a job aggregator that yields postings grouped by company.
