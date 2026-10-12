@@ -16,6 +16,8 @@ import (
 type fakeSource struct {
 	roles    []ats.JobPosting
 	statuses map[string]string
+	settings map[string]string
+	runs     []*storage.CrawlRun
 }
 
 func (f *fakeSource) ListDirectApplyRoles(context.Context, storage.DirectApplyFilter) ([]ats.JobPosting, error) {
@@ -39,12 +41,24 @@ func (f *fakeSource) SetRoleStatus(_ context.Context, id, st string) error {
 func (f *fakeSource) GetLastCrawlRun(context.Context) (*storage.CrawlRun, error) {
 	return &storage.CrawlRun{CompletedAt: time.Now()}, nil
 }
+func (f *fakeSource) RecordCrawlRun(_ context.Context, run *storage.CrawlRun) error {
+	f.runs = append(f.runs, run)
+	return nil
+}
+func (f *fakeSource) GetSetting(_ context.Context, k string) (string, bool, error) {
+	v, ok := f.settings[k]
+	return v, ok, nil
+}
+func (f *fakeSource) SetSetting(_ context.Context, k, v string) error {
+	f.settings[k] = v
+	return nil
+}
 
 var now = time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 
 func newFake() *fakeSource {
 	day := func(n int) time.Time { return now.Add(-time.Duration(n) * 24 * time.Hour) }
-	return &fakeSource{statuses: map[string]string{}, roles: []ats.JobPosting{
+	return &fakeSource{statuses: map[string]string{}, settings: map[string]string{}, roles: []ats.JobPosting{
 		{ID: "1", Title: "Senior Backend Engineer", CompanyName: "Acme", CompanyDomain: "acme.com", Location: "Remote - Worldwide",
 			Seniority: "Senior", Keywords: []string{"go", "redis"}, GlobalRemote: true, ContractorFriendly: true, FirstSeenAt: day(1), ApplyURL: "https://acme.com/apply/1"},
 		{ID: "2", Title: "Staff Platform Engineer", CompanyName: "Initech", CompanyDomain: "initech.com", Location: "Berlin",
@@ -84,7 +98,7 @@ func jobsFor(t *testing.T, s *Server, query string) (int, []string) {
 }
 
 func newServer(src Source) *Server {
-	s := New(src, []string{"Go", "Redis", "Backend"})
+	s := New(src, Options{Skills: []string{"Go", "Redis", "Backend"}})
 	s.now = func() time.Time { return now }
 	return s
 }

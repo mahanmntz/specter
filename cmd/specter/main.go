@@ -26,6 +26,7 @@ import (
 	"specter/internal/feeds"
 	"specter/internal/notify"
 	"specter/internal/reporter"
+	"specter/internal/runner"
 	"specter/internal/scanner"
 	"specter/internal/seeds"
 	"specter/internal/signals"
@@ -605,7 +606,14 @@ func runServe(args []string) {
 		openURL(url)
 	}
 
-	srv := &http.Server{Handler: web.New(store, signals.GetUserSkills()).Handler(), ReadHeaderTimeout: 10 * time.Second}
+	webSrv := web.New(store, web.Options{
+		Skills: signals.GetUserSkills(),
+		Run: func(ctx context.Context, opts runner.Options, prog *web.Progress) (runner.Result, error) {
+			return runner.Run(ctx, store, opts, prog)
+		},
+	})
+	defer webSrv.Close()
+	srv := &http.Server{Handler: webSrv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	go func() {

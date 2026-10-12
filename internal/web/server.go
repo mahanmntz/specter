@@ -12,9 +12,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"specter/internal/ats"
+	"specter/internal/seeds"
 	"specter/internal/signals"
 	"specter/internal/storage"
 )
@@ -28,19 +30,48 @@ type Source interface {
 	ListRoleStatuses(ctx context.Context) (map[string]string, error)
 	SetRoleStatus(ctx context.Context, externalID, status string) error
 	GetLastCrawlRun(ctx context.Context) (*storage.CrawlRun, error)
+	RecordCrawlRun(ctx context.Context, run *storage.CrawlRun) error
+	GetSetting(ctx context.Context, key string) (string, bool, error)
+	SetSetting(ctx context.Context, key, value string) error
+}
+
+// Options configures a Server.
+type Options struct {
+	// Skills used for match scores until the user saves a profile.
+	Skills []string
+	// Run performs a discovery pass; nil disables the Find-jobs button.
+	Run RunFunc
+	// Seeds returns the company catalog to scan; defaults to the embedded catalog.
+	Seeds func() ([]seeds.SeedTarget, error)
 }
 
 // Server is the HTTP handler for the local UI.
 type Server struct {
-	src    Source
+	src      Source
+	now      func() time.Time
+	opts     Options
+	progress *Progress
+	baseCtx  context.Context
+	stopAll  context.CancelFunc
+
+	mu     sync.RWMutex
+	prefs  *Prefs // nil until the user completes setup
 	skills []string
-	now    func() time.Time
 }
 
-// New creates a Server. skills drive the per-job match score.
-func New(src Source, skills []string) *Server {
-	return &Server{src: src, skills: skills, now: time.Now}
+// New creates a Server and restores any saved profile.
+func New(src Source, opts Options) *Server {
+	if opts.Seeds == nil {
+		opts.Seeds = func() ([]seeds.SeedTarget, error) { return seeds.LoadSeeds("") }
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s := &Server{src: src, now: time.Now, opts: opts, progress: newProgress(), baseCtx: ctx, stopAll: cancel, skills: opts.Skills}
+	s.loadPrefs(ctx)
+	return s
 }
+
+// Close cancels any running discovery pass.
+func (s *Server) Close() { s.stopAll() }
 
 // Handler returns the routed, host-checked handler.
 func (s *Server) Handler() http.Handler {
@@ -50,6 +81,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	mux.HandleFunc("GET /api/facets", s.handleFacets)
 	mux.HandleFunc("POST /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/profile", s.handleGetProfile)
+	mux.HandleFunc("PUT /api/profile", s.handlePutProfile)
+	mux.HandleFunc("GET /api/run", s.handleRunStatus)
+	mux.HandleFunc("POST /api/run", s.handleRunStart)
+	mux.HandleFunc("POST /api/run/cancel", s.handleRunCancel)
 	return guard(mux)
 }
 
@@ -65,7 +101,7 @@ func guard(next http.Handler) http.Handler {
 			http.Error(w, "forbidden host", http.StatusForbidden)
 			return
 		}
-		if r.Method == http.MethodPost && r.Header.Get("X-Specter") != "1" {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Header.Get("X-Specter") != "1" {
 			http.Error(w, "missing X-Specter header", http.StatusForbidden)
 			return
 		}
@@ -158,10 +194,18 @@ func (s *Server) load(ctx context.Context) ([]Job, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.mu.RLock()
+	skills, configured := s.skills, s.prefs != nil
+	s.mu.RUnlock()
+
 	jobs := make([]Job, 0, len(roles))
 	for _, r := range roles {
+		// Once a role is chosen, only show postings that fit it (older scans may hold others).
+		if configured && !signals.IsBackendRole(r.Title, r.Department) {
+			continue
+		}
 		corpus := r.Title + " " + r.Department + " " + r.Location + " " + r.RemotePolicy + " " + strings.Join(r.Keywords, " ")
-		score, matches := signals.CalculateSkillMatch(corpus, s.skills)
+		score, matches := signals.CalculateSkillMatch(corpus, skills)
 		apply := r.ApplyURL
 		if apply == "" {
 			apply = r.URL
