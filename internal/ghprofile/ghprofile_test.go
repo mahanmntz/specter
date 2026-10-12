@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -31,44 +33,187 @@ var now = time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
 
 func months(n int) time.Time { return now.AddDate(0, -n, 0) }
 
-func TestWeighPrefersRecentOriginalWork(t *testing.T) {
-	repos := []ghRepo{
-		{Name: "kv-store", Language: "Go", Topics: []string{"raft", "kubernetes"}, Stars: 120, PushedAt: months(1), Description: "Distributed key-value store"},
-		{Name: "api", Language: "Go", PushedAt: months(2)},
-		{Name: "old-site", Language: "JavaScript", PushedAt: months(60)},
-		{Name: "forked-react", Language: "TypeScript", Fork: true, Topics: []string{"react"}, PushedAt: months(1)},
-		{Name: "infra", Language: "HCL", Topics: []string{"terraform", "aws"}, PushedAt: months(3)},
+// repo builds a typical original repository last pushed `ago` months back after `span` months of work.
+func repo(name, lang string, ago, span int, topics ...string) ghRepo {
+	return ghRepo{Name: name, Language: lang, Topics: topics, PushedAt: months(ago), CreatedAt: months(ago + span), Size: 800}
+}
+
+func repeat(n int, f func(i int) ghRepo) []ghRepo {
+	out := make([]ghRepo, n)
+	for i := range out {
+		out[i] = f(i)
 	}
-	w, counts, analyzed := weigh(repos, "Backend dev who loves Postgres", now)
-	if analyzed != 4 {
-		t.Errorf("forks must be skipped when originals exist: analyzed=%d", analyzed)
+	return out
+}
+
+func skillMap(skills []DetectedSkill) map[string]DetectedSkill {
+	m := map[string]DetectedSkill{}
+	for _, s := range skills {
+		m[s.Name] = s
 	}
-	if w["Go"] <= w["JavaScript"] || counts["Go"] != 2 {
-		t.Errorf("recent Go should outweigh stale JS: %v %v", w, counts)
+	return m
+}
+
+func TestRepoWeightFavoursRecentSustainedOriginalWork(t *testing.T) {
+	recent := repoWeight(repo("api", "Go", 1, 18), now)
+	stale := repoWeight(repo("api", "Go", 60, 18), now)
+	oneDay := repoWeight(repo("api", "Go", 1, 0), now)
+	tutorial := repoWeight(repo("go-tutorial", "Go", 1, 18), now)
+	if !(recent > stale*1.5) {
+		t.Errorf("recent %.2f should clearly beat 5-year-old %.2f", recent, stale)
 	}
-	if _, ok := w["React"]; ok {
-		t.Error("forked repo topics must not count")
+	if !(recent > oneDay) {
+		t.Errorf("sustained work %.2f should beat a one-day repo %.2f", recent, oneDay)
 	}
-	if w["Kubernetes"] == 0 || w["Terraform"] == 0 || w["AWS"] == 0 {
-		t.Errorf("topics missing: %v", w)
+	if !(tutorial < recent*0.5) {
+		t.Errorf("tutorial repos must be discounted: %.2f vs %.2f", tutorial, recent)
 	}
-	if w["PostgreSQL"] < 2 {
-		t.Errorf("bio mention should add weight: %v", w)
-	}
-	if w["Distributed Systems"] != 0 {
-		// "Distributed key-value store" mentions "distributed" which is an alias of Distributed Systems
-		t.Logf("description alias hit as expected")
+	starred := repo("lib", "Go", 1, 18)
+	starred.Stars = 500
+	if repoWeight(starred, now) <= recent {
+		t.Error("stars should add weight")
 	}
 }
 
-func TestWeighForkOnlyAccountStillAnalyzed(t *testing.T) {
-	w, _, analyzed := weigh([]ghRepo{{Name: "f", Language: "Rust", Fork: true, PushedAt: months(1)}}, "", now)
-	if analyzed != 1 || w["Rust"] == 0 {
-		t.Errorf("analyzed=%d w=%v", analyzed, w)
+func TestSelectionKeepsDepthAndRecencyNotEverythingEverTouched(t *testing.T) {
+	var repos []ghRepo
+	// Deep, recent Go + Kubernetes work.
+	repos = append(repos, repeat(6, func(i int) ghRepo { return repo("svc", "Go", 1+i, 20, "kubernetes") })...)
+	// Solid Python a year or two back.
+	repos = append(repos, repeat(3, func(i int) ghRepo { return repo("tool", "Python", 14+i, 10) })...)
+	// One-off experiments and old coursework.
+	repos = append(repos, repo("try-swift", "Swift", 2, 0), repo("flutter-demo", "Dart", 40, 1), repo("site", "HTML", 50, 1), repo("sh", "Shell", 3, 0))
+	acc, analyzed := weighSkills(repos, profileText{hints: map[string]float64{}}, now)
+	if analyzed != len(repos) {
+		t.Fatalf("analyzed=%d", analyzed)
+	}
+	got := skillMap(selectSkills(acc))
+
+	for _, want := range []string{"Go", "Kubernetes", "Python"} {
+		if !got[want].Selected {
+			t.Errorf("%s should be pre-selected: %+v", want, got[want])
+		}
+	}
+	for _, noise := range []string{"Swift", "Dart", "HTML", "Shell"} {
+		if s, ok := got[noise]; ok && s.Selected {
+			t.Errorf("%s was a one-off and must not be pre-selected: %+v", noise, s)
+		}
+	}
+	if got["Go"].Score <= got["Python"].Score {
+		t.Errorf("recent deep Go should outrank older Python: %v vs %v", got["Go"].Score, got["Python"].Score)
+	}
+	if got["Go"].LastUsed.IsZero() || got["Go"].Repos != 6 {
+		t.Errorf("Go usage details wrong: %+v", got["Go"])
 	}
 }
 
-func fakeGitHub(t *testing.T, user, repos string, status int) *Client {
+func TestPreselectionIsCappedAndGenericSkillsNeedEmphasis(t *testing.T) {
+	langs := []string{"Go", "Python", "Java", "Rust", "Kotlin", "Ruby", "PHP", "Scala", "Elixir", "C#", "Swift", "TypeScript"}
+	var repos []ghRepo
+	for _, l := range langs {
+		repos = append(repos, repeat(3, func(i int) ghRepo { return repo("p", l, 1+i, 12) })...)
+	}
+	repos = append(repos, repeat(2, func(i int) ghRepo { return repo("page", "HTML", 1, 12) })...)
+	acc, _ := weighSkills(repos, profileText{hints: map[string]float64{}}, now)
+	sel := 0
+	for _, s := range selectSkills(acc) {
+		if s.Selected {
+			sel++
+		}
+		if s.Name == "HTML" && s.Selected {
+			t.Error("a minor generic skill must not be pre-selected")
+		}
+	}
+	if sel != maxPreselected {
+		t.Errorf("pre-selected %d, want cap %d", sel, maxPreselected)
+	}
+}
+
+func TestSparseProfileStillGetsStartingPoint(t *testing.T) {
+	acc, _ := weighSkills([]ghRepo{repo("a", "Go", 1, 1)}, profileText{hints: map[string]float64{}}, now)
+	var picked int
+	for _, s := range selectSkills(acc) {
+		if s.Selected {
+			picked++
+		}
+	}
+	if picked == 0 {
+		t.Error("expected at least one suggestion for a sparse profile")
+	}
+}
+
+func TestProfileTextReadsREADMEAndIgnoresLearning(t *testing.T) {
+	readme := `# Hi, I'm Ada 👋
+Backend engineer building APIs.
+
+![Go](https://img.shields.io/badge/Go-00ADD8?logo=go&logoColor=white)
+![Postgres](https://img.shields.io/badge/PostgreSQL-4169E1)
+Tech: Kubernetes, Redis and gRPC.
+
+Currently learning Rust and Swift.
+Let's go build something. Fun fact: I rust my bike.`
+	pt := readProfileText("Open source lover", readme)
+	have := map[string]bool{}
+	for _, s := range pt.skills {
+		have[s] = true
+	}
+	for _, want := range []string{"Go", "PostgreSQL", "Kubernetes", "Redis", "gRPC"} {
+		if !have[want] {
+			t.Errorf("missing %s in %v", want, pt.skills)
+		}
+	}
+	for _, bad := range []string{"Rust", "Swift"} {
+		if have[bad] {
+			t.Errorf("%s is something Ada is still learning", bad)
+		}
+	}
+	if pt.hints["backend"] == 0 {
+		t.Errorf("'Backend engineer' should hint the backend role: %v", pt.hints)
+	}
+}
+
+func TestEnglishWordsAreNotSkills(t *testing.T) {
+	pt := readProfileText("Let's go swiftly. I like to rest and go for walks, rust never sleeps.", "")
+	if len(pt.skills) != 0 {
+		t.Errorf("lowercase English words must not become skills: %v", pt.skills)
+	}
+}
+
+func TestRoleRanking(t *testing.T) {
+	mk := func(w map[string]float64) map[string]*skillAcc {
+		m := map[string]*skillAcc{}
+		for k, v := range w {
+			m[k] = &skillAcc{weight: v}
+		}
+		return m
+	}
+	// Clear specialist.
+	best, order, _ := rankRoles(mk(map[string]float64{"React": 12, "TypeScript": 14, "CSS": 6, "Next.js": 5}), profileText{hints: map[string]float64{}})
+	if best != "frontend" || order[0] != "frontend" || order[1] != "software-engineer" {
+		t.Errorf("specialist: best=%s order=%v", best, order)
+	}
+	// Broad: backend, frontend and devops work all in similar amounts.
+	best, order, _ = rankRoles(mk(map[string]float64{
+		"Go": 9, "PostgreSQL": 8, "Redis": 6, // backend
+		"React": 9, "TypeScript": 9, "CSS": 6, // frontend
+		"Kubernetes": 8, "Docker": 8, "Terraform": 6, // devops
+	}), profileText{hints: map[string]float64{}})
+	if best != "software-engineer" {
+		t.Errorf("a broad profile is a generalist, got %s (%v)", best, order)
+	}
+	// Broad code, but the person says what they are.
+	best, _, _ = rankRoles(mk(map[string]float64{"Go": 9, "PostgreSQL": 8, "React": 9, "TypeScript": 9, "Kubernetes": 8, "Docker": 8}),
+		profileText{hints: map[string]float64{"devops": 3}})
+	if best != "devops" {
+		t.Errorf("self-declared role should win: %s", best)
+	}
+	// Nothing to go on.
+	if best, _, _ = rankRoles(map[string]*skillAcc{}, profileText{hints: map[string]float64{}}); best != "software-engineer" {
+		t.Errorf("empty → %s", best)
+	}
+}
+
+func fakeGitHub(t *testing.T, user, repos, readme string, status int) *Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != 200 {
@@ -83,6 +228,15 @@ func fakeGitHub(t *testing.T, user, repos string, status int) *Client {
 				t.Errorf("query = %s", r.URL.RawQuery)
 			}
 			_, _ = w.Write([]byte(repos))
+		case "/repos/octocat/octocat/readme":
+			if !strings.Contains(r.Header.Get("Accept"), "raw") {
+				t.Errorf("README must be requested raw, Accept=%q", r.Header.Get("Accept"))
+			}
+			if readme == "" {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(readme))
 		default:
 			http.NotFound(w, r)
 		}
@@ -91,63 +245,55 @@ func fakeGitHub(t *testing.T, user, repos string, status int) *Client {
 	return &Client{HTTP: srv.Client(), BaseURL: srv.URL}
 }
 
-func TestAnalyzeInfersFrontendDeveloper(t *testing.T) {
-	c := fakeGitHub(t,
-		`{"login":"octocat","name":"The Octocat","bio":"UI engineer","location":"SF","avatar_url":"https://a/b.png","public_repos":9,"followers":50}`,
-		`[{"name":"design-system","language":"TypeScript","topics":["react","tailwindcss","accessibility"],"stargazers_count":40,"pushed_at":"2026-09-01T00:00:00Z"},
-		  {"name":"site","language":"CSS","topics":["css"],"pushed_at":"2026-08-01T00:00:00Z"},
-		  {"name":"scripts","language":"Shell","pushed_at":"2026-01-01T00:00:00Z"}]`, 200)
+func TestAnalyzeUsesReposAndProfileREADME(t *testing.T) {
+	recent := now.AddDate(0, -1, 0).Format(time.RFC3339)
+	created := now.AddDate(-2, 0, 0).Format(time.RFC3339)
+	repos := `[` + strings.Join([]string{
+		`{"name":"ds","language":"TypeScript","topics":["react","accessibility"],"stargazers_count":40,"size":900,"pushed_at":"` + recent + `","created_at":"` + created + `"}`,
+		`{"name":"site","language":"CSS","topics":["css"],"size":500,"pushed_at":"` + recent + `","created_at":"` + created + `"}`,
+		`{"name":"ui-kit","language":"TypeScript","topics":["react","tailwindcss"],"size":700,"pushed_at":"` + recent + `","created_at":"` + created + `"}`,
+	}, ",") + `]`
+	c := fakeGitHub(t, `{"login":"octocat","name":"The Octocat","bio":"UI engineer","public_repos":9}`, repos,
+		"# Octo\nFrontend developer. Stack: React, TypeScript, Redux.", 200)
 
 	res, err := c.Analyze(context.Background(), "https://github.com/octocat")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Name != "The Octocat" || res.Login != "octocat" || res.ReposAnalyzed != 3 {
+	if !res.ReadmeUsed || res.ReposAnalyzed != 3 || res.Name != "The Octocat" {
 		t.Errorf("res = %+v", res)
 	}
-	if res.Role != "frontend" {
-		t.Errorf("role = %s scores=%v", res.Role, res.RoleScores)
+	if res.Role != "frontend" || res.Roles[0] != "frontend" {
+		t.Errorf("role = %s %v scores=%v", res.Role, res.Roles, res.RoleScores)
 	}
-	names := map[string]bool{}
-	for _, s := range res.Skills {
-		names[s.Name] = true
-	}
-	for _, want := range []string{"TypeScript", "React", "Tailwind", "Accessibility", "CSS"} {
-		if !names[want] {
-			t.Errorf("missing skill %s in %v", want, res.Skills)
+	got := skillMap(res.Skills)
+	for _, want := range []string{"React", "TypeScript"} {
+		if !got[want].Selected {
+			t.Errorf("%s should be pre-selected: %+v", want, got[want])
 		}
 	}
-	if res.Skills[0].Score < res.Skills[len(res.Skills)-1].Score {
-		t.Error("skills must be sorted by score")
+	if !got["Redux"].FromProfile {
+		t.Errorf("Redux comes from the README only: %+v", got["Redux"])
 	}
 }
 
-func TestAnalyzeErrors(t *testing.T) {
-	if _, err := fakeGitHub(t, "", "", 404).Analyze(context.Background(), "octocat"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("404 → %v", err)
-	}
-	if _, err := fakeGitHub(t, "", "", 403).Analyze(context.Background(), "octocat"); !errors.Is(err, ErrRateLimited) {
-		t.Errorf("403 → %v", err)
-	}
-	if _, err := (&Client{}).Analyze(context.Background(), "not a user!"); !errors.Is(err, ErrInvalidLogin) {
-		t.Errorf("invalid → %v", err)
-	}
-}
-
-func TestEmptyAccountDefaultsToBackend(t *testing.T) {
-	c := fakeGitHub(t, `{"login":"octocat"}`, `[]`, 200)
+func TestAnalyzeWorksWithoutProfileREADME(t *testing.T) {
+	c := fakeGitHub(t, `{"login":"octocat"}`, `[]`, "", 200)
 	res, err := c.Analyze(context.Background(), "octocat")
-	if err != nil || res.Role != "backend" || len(res.Skills) != 0 {
+	if err != nil || res.ReadmeUsed || res.Role != "software-engineer" || len(res.Skills) != 0 {
 		t.Errorf("res=%+v err=%v", res, err)
 	}
 }
 
-func TestBestRole(t *testing.T) {
-	if got := bestRole(map[string]float64{"ml": 9, "backend": 3, "data": 8}); got != "ml" {
-		t.Errorf("got %s", got)
+func TestAnalyzeErrors(t *testing.T) {
+	if _, err := fakeGitHub(t, "", "", "", 404).Analyze(context.Background(), "octocat"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("404 → %v", err)
 	}
-	if got := bestRole(map[string]float64{}); got != "backend" {
-		t.Errorf("no signal → %s", got)
+	if _, err := fakeGitHub(t, "", "", "", 403).Analyze(context.Background(), "octocat"); !errors.Is(err, ErrRateLimited) {
+		t.Errorf("403 → %v", err)
+	}
+	if _, err := (&Client{}).Analyze(context.Background(), "not a user!"); !errors.Is(err, ErrInvalidLogin) {
+		t.Errorf("invalid → %v", err)
 	}
 }
 
@@ -190,9 +336,9 @@ func TestAvatarDataURL(t *testing.T) {
 }
 
 func TestAnalyzeRetriesOnceThenReportsUnreachable(t *testing.T) {
-	calls := 0
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		calls.Add(1)
 		hj, _ := w.(http.Hijacker)
 		conn, _, _ := hj.Hijack()
 		conn.Close() // simulate a connection reset
@@ -202,7 +348,7 @@ func TestAnalyzeRetriesOnceThenReportsUnreachable(t *testing.T) {
 	if _, err := c.Analyze(context.Background(), "octocat"); !errors.Is(err, ErrUnreachable) {
 		t.Errorf("err = %v", err)
 	}
-	if calls != 2 {
-		t.Errorf("expected exactly one retry, got %d calls", calls)
+	if calls.Load() != 2 {
+		t.Errorf("expected exactly one retry, got %d calls", calls.Load())
 	}
 }

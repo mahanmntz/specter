@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
 	"time"
 
 	"github.com/mahanmntz/specter/internal/feeds"
@@ -123,10 +122,12 @@ func (s *Server) handleRunCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 type importSkill struct {
-	Name     string  `json:"name"`
-	Score    float64 `json:"score"`
-	Repos    int     `json:"repos"`
-	Selected bool    `json:"selected"`
+	Name        string    `json:"name"`
+	Score       float64   `json:"score"`
+	Repos       int       `json:"repos"`
+	LastUsed    time.Time `json:"last_used,omitempty"`
+	FromProfile bool      `json:"from_profile"`
+	Selected    bool      `json:"selected"`
 }
 
 // handleGitHubImport reads a public GitHub profile and proposes a name, role and skills.
@@ -169,30 +170,14 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 		avatar, _ = s.opts.GitHub.AvatarDataURL(ctx, res.AvatarURL) // best effort
 	}
 
-	// Pre-select the strongest signals: skills with real evidence, capped so the list stays readable.
 	skills := make([]importSkill, 0, len(res.Skills))
-	selected := 0
 	for _, sk := range res.Skills {
-		pick := selected < 12 && sk.Score >= 1.5
-		if pick {
-			selected++
-		}
-		skills = append(skills, importSkill{sk.Name, sk.Score, sk.Repos, pick})
+		skills = append(skills, importSkill{sk.Name, sk.Score, sk.Repos, sk.LastUsed, sk.FromProfile, sk.Selected})
 	}
-
-	// Roles ordered by evidence so the UI can offer the runners-up.
-	roles := make([]string, 0, len(res.RoleScores))
-	for id, sc := range res.RoleScores {
-		if sc > 0 || id == res.Role {
-			roles = append(roles, id)
-		}
+	roles := res.Roles
+	if len(roles) == 0 {
+		roles = []string{res.Role}
 	}
-	sort.Slice(roles, func(i, j int) bool {
-		if roles[i] == res.Role || roles[j] == res.Role {
-			return roles[i] == res.Role
-		}
-		return res.RoleScores[roles[i]] > res.RoleScores[roles[j]]
-	})
 
 	name := res.Name
 	if name == "" {
@@ -201,6 +186,6 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"login": res.Login, "name": name, "bio": res.Bio, "location": res.Location,
 		"avatar": avatar, "role": res.Role, "roles": roles, "skills": skills,
-		"repos_analyzed": res.ReposAnalyzed, "public_repos": res.PublicRepos,
+		"repos_analyzed": res.ReposAnalyzed, "public_repos": res.PublicRepos, "readme_used": res.ReadmeUsed,
 	})
 }

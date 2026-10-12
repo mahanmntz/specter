@@ -63,6 +63,24 @@ var skillCatalog = []skillCategory{
 		sk("LLMs", "llm", "large language models", "genai", "openai"), sk("NLP", "natural language processing"),
 		sk("MLOps"), sk("ETL", "data pipelines", "data pipeline"),
 	}},
+	{"Testing & QA", []skillDef{
+		sk("Test Automation", "sdet", "qa automation", "e2e testing"), sk("Selenium"), sk("Cypress"), sk("Playwright"),
+		sk("Jest"), sk("Pytest"), sk("JUnit"),
+	}},
+	{"Security", []skillDef{
+		sk("Penetration Testing", "pentest", "pentesting", "ethical hacking"), sk("OWASP"), sk("Cryptography"),
+		sk("Reverse Engineering"), sk("Threat Modeling"),
+	}},
+	{"Systems & Embedded", []skillDef{
+		sk("Embedded", "embedded systems"), sk("Firmware"), sk("RTOS", "freertos"), sk("Assembly", "asm"),
+		sk("FPGA", "verilog", "vhdl"), sk("Linux Kernel", "kernel"),
+	}},
+	{"Web3", []skillDef{
+		sk("Solidity"), sk("Ethereum", "evm"), sk("Smart Contracts", "smart contract"), sk("Web3", "web3.js", "ethers"),
+	}},
+	{"Games", []skillDef{
+		sk("Unity", "unity3d"), sk("Unreal Engine", "unreal"), sk("Godot"), sk("OpenGL", "vulkan"), sk("Game Development", "gamedev", "game dev"),
+	}},
 	{"Practices", []skillDef{
 		sk("Testing", "tdd", "unit testing"), sk("Security", "appsec"), sk("Git"),
 	}},
@@ -105,22 +123,51 @@ func CanonicalSkill(s string) (string, bool) {
 	return name, ok
 }
 
-// FindSkills returns the canonical catalog skills mentioned in free text (word-boundary aware),
-// e.g. a GitHub bio or repository description.
+// ambiguousSkills are catalog terms that are also ordinary English words. In free text they only
+// count when written capitalised ("Go", "Rust", "Swift"), never in lower case ("let's go").
+var ambiguousSkills = map[string]bool{
+	"go": true, "rust": true, "swift": true, "spring": true, "rails": true, "express": true, "flask": true,
+	"nest": true, "next": true, "unity": true, "unreal": true, "git": true, "kernel": true, "distributed": true,
+	"architecture": true, "embedded": true, "security": true, "testing": true, "rest": true, "react": true,
+}
+
+// neverInFreeText are abbreviations too short or common to trust outside structured fields.
+var neverInFreeText = map[string]bool{"c": true, "sh": true, "ts": true, "js": true, "py": true, "ml": true, "node": true}
+
+// FindSkills returns the canonical catalog skills mentioned in free text (a GitHub bio, README or
+// repository description). Matching is word-boundary aware and conservative about ambiguous words.
 func FindSkills(text string) []string {
 	skillIndexOnce.Do(buildSkillIndex)
 	var found []string
 	seen := map[string]bool{}
 	for term, canon := range skillIndex {
-		if len(term) < 2 || seen[canon] {
+		if len(term) < 2 || seen[canon] || neverInFreeText[term] {
 			continue
 		}
-		if containsTerm(text, term) {
-			seen[canon] = true
-			found = append(found, canon)
+		if ambiguousSkills[term] {
+			if !containsCapitalised(text, term) {
+				continue
+			}
+		} else if !containsTerm(text, term) {
+			continue
 		}
+		seen[canon] = true
+		found = append(found, canon)
 	}
 	return found
+}
+
+var capRegexes sync.Map // term -> *regexp.Regexp
+
+// containsCapitalised matches term only when its first letter is upper case in the text.
+func containsCapitalised(text, term string) bool {
+	v, ok := capRegexes.Load(term)
+	if !ok {
+		cap := strings.ToUpper(term[:1]) + term[1:]
+		re := regexp.MustCompile(`(^|[^A-Za-z0-9])` + regexp.QuoteMeta(cap) + `($|[^A-Za-z0-9])`)
+		v, _ = capRegexes.LoadOrStore(term, re)
+	}
+	return v.(*regexp.Regexp).MatchString(text)
 }
 
 var termRegexes sync.Map // term -> *regexp.Regexp
@@ -146,9 +193,17 @@ var roleSignatures = map[string][]string{
 	"frontend":  {"TypeScript", "JavaScript", "React", "Vue", "Angular", "Svelte", "Next.js", "Nuxt", "HTML", "CSS", "Tailwind", "Redux", "Webpack", "Vite", "Accessibility"},
 	"devops": {"Terraform", "Kubernetes", "Docker", "Helm", "Ansible", "AWS", "GCP", "Azure", "CI/CD", "GitHub Actions", "Prometheus",
 		"Grafana", "Linux", "Shell", "Nginx", "Observability"},
-	"data":   {"Spark", "Airflow", "dbt", "Snowflake", "BigQuery", "Pandas", "SQL", "Kafka", "ETL", "ClickHouse"},
-	"ml":     {"PyTorch", "TensorFlow", "Machine Learning", "LLMs", "NLP", "MLOps", "Pandas"},
-	"mobile": {"Swift", "Kotlin", "Dart", "iOS", "Android", "React Native", "Flutter", "SwiftUI", "Jetpack Compose"},
+	"data":       {"Spark", "Airflow", "dbt", "Snowflake", "BigQuery", "Pandas", "SQL", "Kafka", "ETL", "ClickHouse"},
+	"ml":         {"PyTorch", "TensorFlow", "Machine Learning", "LLMs", "NLP", "MLOps", "Pandas"},
+	"mobile":     {"Swift", "Kotlin", "Dart", "iOS", "Android", "React Native", "Flutter", "SwiftUI", "Jetpack Compose"},
+	"security":   {"Security", "Penetration Testing", "OWASP", "Cryptography", "Reverse Engineering", "Threat Modeling"},
+	"qa":         {"Testing", "Test Automation", "Selenium", "Cypress", "Playwright", "Jest", "Pytest", "JUnit"},
+	"embedded":   {"Embedded", "Firmware", "RTOS", "C", "C++", "Rust", "Assembly", "Linux Kernel", "FPGA"},
+	"blockchain": {"Solidity", "Ethereum", "Smart Contracts", "Web3"},
+	"game":       {"Unity", "Unreal Engine", "Godot", "OpenGL", "Game Development", "C#", "C++"},
+	// "software-engineer" is the generalist role: it has no signature of its own and is chosen
+	// when someone's work is spread across several of the roles above.
+	"software-engineer": nil,
 }
 
 // RoleScores scores every preset against weighted skills (skill name -> weight).

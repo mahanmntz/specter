@@ -10,16 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/mahanmntz/specter/internal/signals"
 )
 
 // Errors returned by Analyze.
@@ -44,11 +40,14 @@ func NewClient() *Client {
 	return &Client{HTTP: &http.Client{Timeout: 20 * time.Second}, BaseURL: "https://api.github.com", Token: os.Getenv("GITHUB_TOKEN")}
 }
 
-// DetectedSkill is a catalog skill inferred from the user's repositories.
+// DetectedSkill is a catalog skill inferred from the user's work and self-description.
 type DetectedSkill struct {
-	Name  string  `json:"name"`
-	Score float64 `json:"score"`
-	Repos int     `json:"repos"`
+	Name        string    `json:"name"`
+	Score       float64   `json:"score"`
+	Repos       int       `json:"repos"`
+	LastUsed    time.Time `json:"last_used,omitempty"`
+	FromProfile bool      `json:"from_profile"` // named in the bio or profile README
+	Selected    bool      `json:"selected"`     // strong enough to pre-select
 }
 
 // Result is what Analyze learned about a user.
@@ -62,8 +61,10 @@ type Result struct {
 	PublicRepos   int                `json:"public_repos"`
 	Followers     int                `json:"followers"`
 	ReposAnalyzed int                `json:"repos_analyzed"`
+	ReadmeUsed    bool               `json:"readme_used"`
 	Skills        []DetectedSkill    `json:"skills"`
 	Role          string             `json:"role"`
+	Roles         []string           `json:"roles"` // best first
 	RoleScores    map[string]float64 `json:"role_scores"`
 }
 
@@ -109,6 +110,8 @@ type ghRepo struct {
 	Fork        bool      `json:"fork"`
 	Archived    bool      `json:"archived"`
 	PushedAt    time.Time `json:"pushed_at"`
+	CreatedAt   time.Time `json:"created_at"`
+	Size        int       `json:"size"` // KB
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
@@ -172,113 +175,45 @@ func (c *Client) Analyze(ctx context.Context, login string) (*Result, error) {
 		Login: user.Login, Name: user.Name, Bio: user.Bio, Location: user.Location, Company: user.Company,
 		AvatarURL: user.AvatarURL, PublicRepos: user.Repos, Followers: user.Followers,
 	}
-	weights, repoCounts, analyzed := weigh(repos, user.Bio, time.Now())
-	res.ReposAnalyzed = analyzed
-	res.RoleScores = signals.RoleScores(weights)
-	res.Role = bestRole(res.RoleScores)
 
-	for name, w := range weights {
-		res.Skills = append(res.Skills, DetectedSkill{Name: name, Score: math.Round(w*10) / 10, Repos: repoCounts[name]})
-	}
-	sort.Slice(res.Skills, func(i, j int) bool {
-		if res.Skills[i].Score != res.Skills[j].Score {
-			return res.Skills[i].Score > res.Skills[j].Score
-		}
-		return res.Skills[i].Name < res.Skills[j].Name
-	})
+	// The profile README (the "overview": the special <login>/<login> repository) is how people
+	// describe themselves, so it is a strong signal. It is optional.
+	readme, _ := c.getRaw(ctx, "/repos/"+url.PathEscape(login)+"/"+url.PathEscape(login)+"/readme")
+	res.ReadmeUsed = strings.TrimSpace(readme) != ""
+
+	analyze(res, repos, user.Bio, readme, time.Now())
 	return res, nil
 }
 
-// languageSkills maps GitHub's language labels onto catalog skills (beyond exact-name matches).
-var languageSkills = map[string][]string{
-	"Jupyter Notebook": {"Python", "Machine Learning"},
-	"HCL":              {"Terraform"},
-	"Dockerfile":       {"Docker"},
-	"PLpgSQL":          {"PostgreSQL", "SQL"},
-	"TSQL":             {"SQL"},
-	"SCSS":             {"CSS"},
-	"Objective-C":      {"iOS"},
-	"Vue":              {"Vue"},
-	"Svelte":           {"Svelte"},
-	"Smarty":           {"Helm"},
-}
-
-// weigh turns repositories into per-skill weights. Recent, starred, original work counts more;
-// topics are a stronger signal than the primary language, which is stronger than description mentions.
-func weigh(repos []ghRepo, bio string, now time.Time) (weights map[string]float64, repoCounts map[string]int, analyzed int) {
-	weights = map[string]float64{}
-	repoCounts = map[string]int{}
-
-	originals := 0
-	for _, r := range repos {
-		if !r.Fork {
-			originals++
-		}
+// getRaw fetches a raw text document (e.g. a README); a missing document is not an error.
+func (c *Client) getRaw(ctx context.Context, path string) (string, error) {
+	base := c.BaseURL
+	if base == "" {
+		base = "https://api.github.com"
 	}
-
-	for _, r := range repos {
-		// Forks are mostly other people's code; ignore them unless that is all there is.
-		if r.Fork && originals > 0 {
-			continue
-		}
-		analyzed++
-		w := 1.0
-		if age := now.Sub(r.PushedAt); age < 365*24*time.Hour {
-			w += 1
-		} else if age > 3*365*24*time.Hour {
-			w -= 0.5
-		}
-		if r.Archived {
-			w -= 0.5
-		}
-		w += 0.5 * math.Log2(1+float64(r.Stars))
-		if w < 0.25 {
-			w = 0.25
-		}
-
-		hit := map[string]float64{}
-		add := func(skill string, factor float64) {
-			if v := w * factor; v > hit[skill] {
-				hit[skill] = v
-			}
-		}
-		if r.Language != "" {
-			if canon, ok := signals.CanonicalSkill(r.Language); ok {
-				add(canon, 1)
-			}
-			for _, s := range languageSkills[r.Language] {
-				add(s, 1)
-			}
-		}
-		for _, topic := range r.Topics {
-			if canon, ok := signals.CanonicalSkill(topic); ok {
-				add(canon, 1.5)
-			}
-		}
-		for _, s := range signals.FindSkills(r.Description + " " + strings.ReplaceAll(r.Name, "-", " ")) {
-			add(s, 0.5)
-		}
-		for skill, v := range hit {
-			weights[skill] += v
-			repoCounts[skill]++
-		}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
+	if err != nil {
+		return "", err
 	}
-	// The bio is self-declared, so give each skill it names a solid nudge.
-	for _, s := range signals.FindSkills(bio) {
-		weights[s] += 2
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	req.Header.Set("User-Agent", "specter-local")
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	return weights, repoCounts, analyzed
-}
-
-// bestRole picks the preset with the highest score; backend wins ties and the no-signal case.
-func bestRole(scores map[string]float64) string {
-	best, bestScore := "backend", scores["backend"]
-	for _, p := range signals.Presets() {
-		if s := scores[p.ID]; s > bestScore {
-			best, bestScore = p.ID, s
-		}
+	client := c.HTTP
+	if client == nil {
+		client = http.DefaultClient
 	}
-	return best
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", nil
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 200<<10))
+	return string(data), err
 }
 
 // AvatarDataURL downloads a (small) GitHub avatar and returns it as a data: URL so the UI never

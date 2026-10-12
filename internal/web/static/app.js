@@ -395,11 +395,11 @@
     const first = mode === 'first';
     const existing = pr.configured ? pr.prefs : null;
     const draft = existing ? JSON.parse(JSON.stringify(existing))
-      : { name: '', github: '', avatar: '', role: 'backend', skills: [], seniority: [], worldwide_only: false, feeds: true };
+      : { name: '', github: '', avatar: '', role: 'software-engineer', skills: [], seniority: [], worldwide_only: false, feeds: true };
     draft.skills = draft.skills || []; draft.seniority = draft.seniority || [];
     const presetOf = (id) => pr.presets.find((p) => p.id === id);
     let step = first ? 'intro' : 'profile';
-    let detected = null; let err = ''; let query = ''; let scanTimer = null; let skillsTouched = !!existing;
+    let detected = null; let err = ''; let query = ''; let scanTimer = null; let skillsTouched = !!existing; let showAlso = false;
     if (!draft.skills.length) draft.skills = presetOf(draft.role).skills.slice();
 
     const dlg = $('setup');
@@ -492,11 +492,16 @@
         if (!draft.skills.length) selBox.append(el('span', { class: 'hint', text: 'Nothing selected: we’ll use the defaults for your role.' }));
 
         const q = lc(query.trim());
-        const detNames = detected ? detected.skills.slice(0, 18).map((s) => s.name) : [];
-        detBox.replaceChildren(...detNames.filter((n) => !q || lc(n).includes(q)).map((n) => {
-          const s = detected.skills.find((x) => x.name === n);
-          return chip(n, s.repos + (s.repos === 1 ? ' repo' : ' repos'), drawSkills);
-        }));
+        const tip = (sk) => [sk.repos ? plural(sk.repos, 'repo') : '', sk.last_used && ago(sk.last_used) ? 'last used ' + ago(sk.last_used) : '', sk.from_profile ? 'mentioned in your profile' : ''].filter(Boolean).join(' · ');
+        const strong = detected ? detected.skills.filter((x) => x.selected) : [];
+        const weak = detected ? detected.skills.filter((x) => !x.selected) : [];
+        const detNames = strong.concat(weak).map((x) => x.name);
+        const matches = (x) => !q || lc(x.name).includes(q);
+        const alsoLink = weak.length && !q
+          ? el('button', { class: 'link', type: 'button', onclick: () => { showAlso = !showAlso; drawSkills(); }, text: showAlso ? 'Show fewer' : 'Show ' + weak.length + ' more found on GitHub' })
+          : null;
+        fill(detBox, ...strong.filter(matches).map((x) => chip(x.name, tip(x), drawSkills)),
+          ...(showAlso || q ? weak.filter(matches).map((x) => chip(x.name, tip(x), drawSkills)) : []), alsoLink);
         detBox.parentElement && (detBox.parentElement.hidden = !detNames.length);
 
         const groups = pr.catalog.map((g) => ({ category: g.category, skills: g.skills.filter((s) => !detNames.includes(s) && (!q || lc(s).includes(q))) })).filter((g) => g.skills.length);
@@ -529,11 +534,11 @@
       const identity = (draft.github || draft.name)
         ? el('div', { class: 'who' }, meBadge(draft),
           el('div', {}, el('b', { text: draft.name || draft.github }),
-            draft.github ? el('span', { text: '@' + draft.github + (detected ? ' · read ' + plural(detected.repos_analyzed, 'repository').replace('repositorys', 'repositories') : '') }) : null,
+            draft.github ? el('span', { text: '@' + draft.github + (detected ? ' · read ' + plural(detected.repos_analyzed, 'repository').replace('repositorys', 'repositories') + (detected.readme_used ? ' and your profile README' : '') : '') }) : null,
             detected && detected.bio ? el('p', { text: detected.bio }) : null))
         : null;
 
-      const detWrap = el('div', {}, el('span', { class: 'w-label' }, 'From your GitHub', el('span', { class: 'hint', text: 'strongest signals are pre-selected' })), detBox);
+      const detWrap = el('div', {}, el('span', { class: 'w-label' }, 'From your GitHub', el('span', { class: 'hint', text: 'what you use most, recent work first' })), detBox);
 
       fill(dlg,
         el('div', { class: 'w-body' },

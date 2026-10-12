@@ -29,13 +29,14 @@ func importServer(t *testing.T, gh GitHubAnalyzer) *Server {
 	return s
 }
 
-func TestGitHubImportSuggestsRoleAndSkills(t *testing.T) {
+func TestGitHubImportPassesThroughRoleSkillsAndREADMEFlag(t *testing.T) {
 	res := &ghprofile.Result{
 		Login: "octocat", Name: "", Bio: "hi", AvatarURL: "https://avatars.githubusercontent.com/u/1",
-		Role:       "devops",
-		RoleScores: map[string]float64{"devops": 9, "backend": 4, "frontend": 0, "data": 1},
+		Role: "devops", Roles: []string{"devops", "software-engineer", "backend"}, ReadmeUsed: true,
 		Skills: []ghprofile.DetectedSkill{
-			{Name: "Terraform", Score: 5, Repos: 3}, {Name: "Go", Score: 3, Repos: 2}, {Name: "Shell", Score: 1.0, Repos: 1},
+			{Name: "Terraform", Score: 5, Repos: 3, Selected: true, FromProfile: true},
+			{Name: "Go", Score: 3, Repos: 2, Selected: true},
+			{Name: "Shell", Score: 1.0, Repos: 1},
 		},
 		ReposAnalyzed: 7,
 	}
@@ -44,24 +45,25 @@ func TestGitHubImportSuggestsRoleAndSkills(t *testing.T) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	var out struct {
-		Name   string
-		Avatar string
-		Role   string
-		Roles  []string
-		Skills []importSkill
+		Name       string
+		Avatar     string
+		Role       string
+		Roles      []string
+		Skills     []importSkill
+		ReadmeUsed bool `json:"readme_used"`
 	}
 	_ = json.Unmarshal(rec.Body.Bytes(), &out)
 	if out.Name != "octocat" { // falls back to the login when the profile has no display name
 		t.Errorf("name = %q", out.Name)
 	}
-	if out.Role != "devops" || out.Roles[0] != "devops" || out.Roles[1] != "backend" || len(out.Roles) != 3 {
-		t.Errorf("roles = %v (%s)", out.Roles, out.Role)
+	if out.Role != "devops" || len(out.Roles) != 3 || out.Roles[1] != "software-engineer" || !out.ReadmeUsed {
+		t.Errorf("roles = %v (%s) readme=%v", out.Roles, out.Role, out.ReadmeUsed)
 	}
 	if out.Avatar == "" {
 		t.Error("avatar should be inlined as a data URL")
 	}
-	if !out.Skills[0].Selected || !out.Skills[1].Selected || out.Skills[2].Selected {
-		t.Errorf("only skills with real evidence are pre-selected: %+v", out.Skills)
+	if !out.Skills[0].Selected || !out.Skills[0].FromProfile || !out.Skills[1].Selected || out.Skills[2].Selected {
+		t.Errorf("selection comes from the analyzer: %+v", out.Skills)
 	}
 }
 

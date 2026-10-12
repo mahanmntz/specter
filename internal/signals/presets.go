@@ -26,6 +26,15 @@ func preset(id, label, emoji, blurb string, skills, keywords, include, block []s
 }
 
 var presets = []Preset{
+	preset("software-engineer", "Software Engineer", "💻", "Generalist: any stack, any layer",
+		[]string{"TypeScript", "Python", "PostgreSQL", "Docker", "Git", "REST"},
+		[]string{"python", "java", "go", "golang", "typescript", "javascript", "rust", "kotlin", "ruby", "php", "scala", "node.js", "nodejs",
+			"react", "postgres", "postgresql", "mysql", "mongodb", "redis", "docker", "kubernetes", "aws", "gcp", "azure", "rest", "graphql",
+			"microservices", "api", "sql", "linux", "ci/cd", "kafka", "distributed systems", "full stack", "fullstack", "backend", "frontend"},
+		[]string{"software engineer", "software developer", "software development engineer", "sde", "swe", "programmer", "member of technical staff",
+			"mts", "application developer", "application engineer", "web developer", "product engineer", "full stack", "fullstack", "full-stack",
+			"backend", "back-end", "frontend", "front-end", "platform engineer"},
+		[]string{"sales engineer", "solutions engineer", "support engineer", "customer engineer", "developer advocate", "developer relations", "devrel", "technical account", "technical writer"}),
 	{ID: "backend", Label: "Backend", Emoji: "⚙️", Blurb: "APIs, services, distributed systems", Profile: Profile{
 		Skills: []string{"Go", "Python", "PostgreSQL", "Redis", "Kubernetes", "Distributed Systems", "gRPC", "Docker"},
 		Keywords: []string{
@@ -78,6 +87,34 @@ var presets = []Preset{
 		[]string{"swift", "swiftui", "kotlin", "jetpack compose", "react native", "flutter", "ios", "android", "objective-c", "xcode", "mobile"},
 		[]string{"ios engineer", "ios developer", "android engineer", "android developer", "mobile engineer", "mobile developer", "react native", "flutter", "swift", "kotlin", "mobile"},
 		[]string{"backend", "back-end", "devops", "site reliability", "sre", "data engineer", "machine learning", "ml engineer"}),
+	preset("security", "Security", "🛡️", "AppSec, pentesting, cryptography",
+		[]string{"Security", "Penetration Testing", "OWASP", "Cryptography", "Linux", "Python"},
+		[]string{"security", "penetration testing", "owasp", "cryptography", "threat modeling", "siem", "vulnerability", "appsec",
+			"red team", "reverse engineering", "malware", "zero trust", "iam", "encryption", "devsecops"},
+		[]string{"security engineer", "application security", "appsec", "product security", "security researcher", "penetration", "pentest",
+			"red team", "blue team", "detection engineer", "threat", "cryptograph", "vulnerability", "devsecops", "cloud security", "security software"},
+		[]string{"frontend", "front-end", "ios", "android", "mobile", "data scientist", "machine learning"}),
+	preset("qa", "QA / Test Automation", "🧪", "Quality engineering and test automation",
+		[]string{"Test Automation", "Selenium", "Cypress", "Playwright", "Pytest", "CI/CD"},
+		[]string{"selenium", "cypress", "playwright", "test automation", "pytest", "jest", "junit", "qa", "quality assurance", "testing",
+			"e2e", "ci/cd", "api testing", "postman", "performance testing"},
+		[]string{"qa engineer", "quality assurance", "sdet", "test engineer", "test automation", "software engineer in test", "quality engineer", "automation engineer", "qa automation", "tester"},
+		[]string{"ios engineer", "android engineer", "machine learning", "data scientist", "devops"}),
+	preset("embedded", "Embedded / Systems", "🔌", "Firmware, kernels, low-level software",
+		[]string{"C", "C++", "Rust", "Embedded", "RTOS", "Linux Kernel"},
+		[]string{"embedded", "firmware", "rtos", "kernel", "device drivers", "fpga", "bare metal", "microcontroller", "yocto", "assembly", "rust", "linux", "systems programming"},
+		[]string{"embedded", "firmware", "rtos", "systems engineer", "kernel", "device driver", "fpga", "low-level", "systems software", "bsp", "robotics"},
+		[]string{"frontend", "front-end", "web developer", "data scientist", "machine learning"}),
+	preset("blockchain", "Blockchain / Web3", "⛓️", "Smart contracts and protocol engineering",
+		[]string{"Solidity", "Ethereum", "Smart Contracts", "Rust", "Go", "Web3"},
+		[]string{"solidity", "ethereum", "smart contracts", "web3", "defi", "evm", "rust", "blockchain", "consensus", "zero knowledge", "cryptography", "solana", "hardhat"},
+		[]string{"blockchain", "web3", "smart contract", "solidity", "protocol engineer", "defi", "cryptography engineer"},
+		[]string{"ios", "android", "data scientist", "machine learning", "devops"}),
+	preset("game", "Game Development", "🎮", "Gameplay, engines, graphics",
+		[]string{"Unity", "Unreal Engine", "C++", "C#", "Game Development", "OpenGL"},
+		[]string{"unity", "unreal engine", "game development", "godot", "opengl", "vulkan", "shaders", "gameplay", "rendering", "graphics", "c#"},
+		[]string{"game", "gameplay", "graphics engineer", "engine programmer", "unity", "unreal", "rendering", "tools programmer"},
+		[]string{"data scientist", "machine learning", "devops", "site reliability"}),
 }
 
 // Presets returns every built-in role preset (a defensive copy).

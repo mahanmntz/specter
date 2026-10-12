@@ -271,7 +271,12 @@ Edit `.env` to configure your environment variables:
 ./specter serve --open
 ```
 
-**First run:** enter your name and GitHub username. Specter reads your public repositories on your own machine, works out your role (Backend, Full-stack, Frontend, DevOps/SRE, Data, ML/AI, Mobile) and the skills you actually use, and shows them as tappable chips. Adjust anything (pick from the skill catalog or add your own), then press **Find my jobs**. No GitHub account? Skip that step and pick a role manually.
+**First run:** enter your name and GitHub username. Specter reads your public repositories **and your profile README** (the "overview" on your GitHub page) on your own machine, then:
+
+- picks your **role** from 13 options (Software Engineer, Backend, Full-stack, Frontend, DevOps/SRE, Data, ML/AI, Mobile, Security, QA, Embedded, Blockchain, Game Dev). If your work is spread evenly across several areas you are a generalist **Software Engineer** rather than being forced into one box, and if your README says what you do ("Backend engineer…"), that wins;
+- pre-selects only the skills you use **most and most recently**, not everything you ever touched. Recent, sustained, starred work counts more; tutorials, forks and one-off experiments count less; skills you say you are *learning* are ignored. Hover a skill to see how many repos use it and when you last did. Weaker findings sit behind "Show more".
+
+Adjust anything by tapping chips (pick from the skill catalog or add your own), then press **Find my jobs**. No GitHub account? Skip that step and pick a role manually.
 
 Specter then searches its company catalog plus RemoteOK and Hacker News in the background, with live progress, and fills the page as results arrive. Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
 
