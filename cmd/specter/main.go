@@ -149,9 +149,15 @@ func runScan(args []string) {
 	timeoutSec := fs.Int("timeout", 15, "HTTP request timeout in seconds")
 	forceRefresh := fs.Bool("force", false, "Force refresh and bypass crawler frontier deduplication cache")
 	syncSheets := fs.Bool("sync-sheets", false, "Automatically sync newly discovered leads & jobs to Google Sheets upon completion")
+	mineLeads := fs.Bool("mine-leads", os.Getenv("SPECTER_MINE_LEADS") == "1", "Opt in to mining public GitHub commit metadata for contributor leads/emails (off by default; see SECURITY.md)")
 	webhookURL := fs.String("webhook", "", "Custom Google Sheets webhook URL override")
 
 	fs.Parse(args)
+
+	// Passing an explicit --github org is an explicit request to mine it.
+	if *githubOrg != "" {
+		*mineLeads = true
+	}
 
 	// If neither --all nor --target was explicitly passed, default to all seeds
 	if !*all && *target == "" {
@@ -274,6 +280,7 @@ func runScan(args []string) {
 	fmt.Printf("   Run Dir:     \033[1m%s\033[0m\n", runDir)
 	fmt.Printf("   Targets:     \033[1m%d companies queued\033[0m\n", len(targetSeeds))
 	fmt.Printf("   Concurrency: \033[1m%d workers\033[0m\n", *concurrency)
+	fmt.Printf("   Lead mining: \033[1m%v\033[0m\n", *mineLeads)
 	fmt.Printf("   GitHub Pool: \033[1m%d tokens active\033[0m\n", tp.Count())
 	fmt.Printf("   Pacer:       \033[1mAdaptive (1.2 rps GH, 2.0 rps ATS, 300-1200ms jitter, canary 429 recovery)\033[0m\n")
 	fmt.Printf("   Filter:      \033[1m%s\033[0m\n", *roleFilter)
@@ -345,7 +352,7 @@ func runScan(args []string) {
 				targetOrg = meta.GitHubOrg
 			}
 
-			if targetOrg != "" && ctx.Err() == nil {
+			if *mineLeads && targetOrg != "" && ctx.Err() == nil {
 				gitKey := "github:" + targetOrg
 				shouldMine, _ := frontier.ShouldCrawl(gitKey, crawlTTL)
 

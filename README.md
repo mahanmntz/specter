@@ -265,6 +265,15 @@ Edit `.env` to configure your environment variables:
 
 ---
 
+## Ethical Use & Privacy
+
+Specter works only with publicly available data, and **contributor lead mining is opt-in**:
+
+- Default: job discovery only (ATS boards, remote-policy classification, deep apply links).
+- Opt in to GitHub contributor/email mining with `--mine-leads` (or `SPECTER_MINE_LEADS=1`; passing `--github <org>` also opts in).
+- Mined emails are personal data. Use them only for legitimate, individual outreach and comply with GDPR/CCPA, GitHub's Terms of Service, and anti-spam laws. Never use Specter for bulk unsolicited email.
+- Respect rate limits and site terms. See [SECURITY.md](SECURITY.md).
+
 ## Your Profile (`profile.json`)
 
 Specter scores and filters postings against *your* profile. Copy the example and edit it:
