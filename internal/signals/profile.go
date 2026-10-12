@@ -39,6 +39,8 @@ func LoadProfile(path string) error {
 
 // ApplyProfile overrides the matcher defaults with the non-empty fields of p.
 func ApplyProfile(p Profile) {
+	profileMu.Lock()
+	defer profileMu.Unlock()
 	if s := cleanList(p.Skills); len(s) > 0 {
 		profileSkills = s
 	}

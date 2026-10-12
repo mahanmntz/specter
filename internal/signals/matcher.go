@@ -4,6 +4,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // Primary backend keywords to identify relevant hiring signals.
@@ -39,6 +40,9 @@ var excludeRoleTerms = []string{
 	"deal desk", "administrative", "copywriter", "office manager",
 }
 
+// profileMu guards the profile-overridable globals below so a profile can be switched at runtime.
+var profileMu sync.RWMutex
+
 var wordBoundaryRegexes = make(map[string]*regexp.Regexp)
 
 func init() {
@@ -54,6 +58,8 @@ func compileKeywords() {
 
 // MatchBackendKeywords returns all unique matched backend keywords from text.
 func MatchBackendKeywords(text string) []string {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
 	var matches []string
 	seen := make(map[string]bool)
 	for kw, re := range wordBoundaryRegexes {
@@ -70,6 +76,8 @@ func MatchBackendKeywords(text string) []string {
 
 // IsBackendRole checks if the role title or department matches backend, software, or fullstack engineering.
 func IsBackendRole(title, department string) bool {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
 	combined := strings.ToLower(title + " " + department)
 
 	isFullStackOrBackend := strings.Contains(combined, "full stack") ||
@@ -115,9 +123,13 @@ func ExtractSeniority(title string) string {
 
 // GetUserSkills returns user's configured skill profile from MY_SKILLS environment variable.
 func GetUserSkills() []string {
+	profileMu.RLock()
 	if len(profileSkills) > 0 {
-		return append([]string(nil), profileSkills...)
+		out := append([]string(nil), profileSkills...)
+		profileMu.RUnlock()
+		return out
 	}
+	profileMu.RUnlock()
 	raw := os.Getenv("MY_SKILLS")
 	if strings.TrimSpace(raw) == "" {
 		raw = "Go, TypeScript, Node.js, NestJS, Express, Python, Backend, Distributed Systems, Microservices, System Design, PostgreSQL, Redis, MongoDB, RabbitMQ, Docker, Kubernetes, Linux, gRPC, REST, CI/CD, Software Engineer"

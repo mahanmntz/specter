@@ -137,6 +137,12 @@ func NewStore(dbPath string) (*Store, error) {
 		error_message TEXT
 	);
 
+	CREATE TABLE IF NOT EXISTS settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS role_status (
 		external_id TEXT PRIMARY KEY,
 		status TEXT NOT NULL,

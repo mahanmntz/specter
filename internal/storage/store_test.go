@@ -402,3 +402,21 @@ func TestRoleStatusRoundTrip(t *testing.T) {
 		t.Error("invalid input must be rejected")
 	}
 }
+
+func TestSettingsRoundTrip(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	if _, ok, err := store.GetSetting(ctx, "profile"); err != nil || ok {
+		t.Fatalf("missing key: ok=%v err=%v", ok, err)
+	}
+	_ = store.SetSetting(ctx, "profile", `{"a":1}`)
+	_ = store.SetSetting(ctx, "profile", `{"a":2}`)
+	if v, ok, _ := store.GetSetting(ctx, "profile"); !ok || v != `{"a":2}` {
+		t.Errorf("v=%q ok=%v", v, ok)
+	}
+}
