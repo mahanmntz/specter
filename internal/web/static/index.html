@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Specter</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">⚡ Specter</div>
+    <input id="q" class="search" type="search" placeholder="Search title, company, location, tech…   ( / )" autocomplete="off">
+    <div id="meta" class="meta"></div>
+  </header>
+
+  <div class="layout">
+    <aside class="filters" id="filters">
+      <div class="group">
+        <div class="label">Show</div>
+        <div class="tabs" id="status-tabs">
+          <button data-status="active" class="on">Active</button>
+          <button data-status="new">Untriaged</button>
+          <button data-status="saved">Saved</button>
+          <button data-status="applied">Applied</button>
+          <button data-status="hidden">Hidden</button>
+          <button data-status="all">All</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <label class="check"><input type="checkbox" id="global"> 🌍 Worldwide remote <span id="c-global" class="count"></span></label>
+        <label class="check"><input type="checkbox" id="contractor"> 🤝 Contractor-friendly <span id="c-contractor" class="count"></span></label>
+      </div>
+
+      <div class="group">
+        <label class="label" for="fresh">Posted</label>
+        <select id="fresh">
+          <option value="0">Any time</option>
+          <option value="1">Last 24 hours</option>
+          <option value="3">Last 3 days</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+      </div>
+
+      <div class="group">
+        <label class="label" for="min_score">Skill match</label>
+        <select id="min_score">
+          <option value="0">Any</option>
+          <option value="45">45%+</option>
+          <option value="65">65%+</option>
+          <option value="80">80%+</option>
+        </select>
+      </div>
+
+      <div class="group">
+        <div class="label">Seniority</div>
+        <div id="seniority" class="stack"></div>
+      </div>
+
+      <div class="group">
+        <label class="label" for="company">Company</label>
+        <input id="company" type="search" placeholder="e.g. stripe" autocomplete="off">
+      </div>
+
+      <div class="group">
+        <div class="label">Tech (all selected)</div>
+        <div id="keywords" class="chips"></div>
+      </div>
+
+      <button id="reset" class="ghost">Reset filters</button>
+    </aside>
+
+    <main>
+      <div class="bar">
+        <div id="count" class="count-line"></div>
+        <label>Sort
+          <select id="sort">
+            <option value="best">Best match</option>
+            <option value="newest">Newest</option>
+            <option value="company">Company A–Z</option>
+          </select>
+        </label>
+      </div>
+      <div id="list" class="list"></div>
+      <button id="more" class="more" hidden>Load more</button>
+      <div id="empty" class="empty" hidden></div>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

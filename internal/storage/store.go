@@ -137,6 +137,12 @@ func NewStore(dbPath string) (*Store, error) {
 		error_message TEXT
 	);
 
+	CREATE TABLE IF NOT EXISTS role_status (
+		external_id TEXT PRIMARY KEY,
+		status TEXT NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_roles_company ON roles(company_id);
 	CREATE INDEX IF NOT EXISTS idx_leads_company ON leads(company_id);
 	CREATE INDEX IF NOT EXISTS idx_leads_contacted ON leads(contacted);

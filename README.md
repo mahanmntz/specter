@@ -265,6 +265,19 @@ Edit `.env` to configure your environment variables:
 
 ---
 
+## Local Web UI
+
+```bash
+./specter run            # find jobs
+./specter serve --open   # browse them at http://127.0.0.1:8080
+```
+
+![Specter web UI](docs/ui.png)
+
+Search and filter everything Specter found: worldwide-remote, contractor-friendly, posted-within, seniority, tech stack, company and skill-match. Mark jobs **Saved / Applied / Hidden** (stored only in your local database) and click **Apply** to open the job's application page. Filters live in the URL, so you can bookmark a search. Press `/` to jump to the search box.
+
+The UI runs entirely on your machine, binds to loopback only, makes no external requests, and refuses to bind elsewhere unless you pass `--allow-remote` (it has no authentication).
+
 ## Supported Job Sources
 
 | ATS | `ats_service` | Example target |

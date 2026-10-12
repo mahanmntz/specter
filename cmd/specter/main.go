@@ -5,8 +5,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +32,7 @@ import (
 	"specter/internal/storage"
 	"specter/internal/sync"
 	"specter/internal/ui"
+	"specter/internal/web"
 
 	"golang.org/x/sync/errgroup"
 )
@@ -68,6 +73,8 @@ func main() {
 		runAutonomous(os.Args[2:])
 	case "scan":
 		runScan(os.Args[2:])
+	case "serve":
+		runServe(os.Args[2:])
 	case "watch":
 		runWatch(os.Args[2:])
 	case "feeds":
@@ -561,6 +568,71 @@ func printCatalogSummary(store *storage.Store) {
 	fmt.Printf("   Query direct-apply jobs: `specter apply --global-only`\n\n")
 }
 
+// runServe starts the local web UI (loopback only by default).
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	addr := fs.String("addr", "127.0.0.1:8080", "Listen address (loopback only unless --allow-remote)")
+	dbPath := fs.String("db", "specter.db", "SQLite database path")
+	openBrowser := fs.Bool("open", false, "Open the UI in your default browser")
+	allowRemote := fs.Bool("allow-remote", false, "Allow binding to a non-loopback address (the UI has no authentication)")
+	fs.Parse(args)
+
+	host, _, err := net.SplitHostPort(*addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Invalid --addr %q: %v\n", *addr, err)
+		os.Exit(1)
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) && !*allowRemote {
+		fmt.Fprintf(os.Stderr, "Refusing to bind %s: the UI has no authentication. Use 127.0.0.1 or pass --allow-remote.\n", *addr)
+		os.Exit(1)
+	}
+
+	store, err := storage.NewStore(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Database error: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	ln, err := net.Listen("tcp", *addr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot listen on %s: %v\n", *addr, err)
+		os.Exit(1)
+	}
+	url := "http://" + ln.Addr().String()
+	fmt.Printf("⚡ Specter UI: %s  (Ctrl+C to stop)\n", url)
+	if *openBrowser {
+		openURL(url)
+	}
+
+	srv := &http.Server{Handler: web.New(store, signals.GetUserSkills()).Handler(), ReadHeaderTimeout: 10 * time.Second}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, c := context.WithTimeout(context.Background(), 3*time.Second)
+		defer c()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func openURL(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
+}
+
 // runWatch repeats a scan on an interval, for unattended use (systemd, Docker, tmux).
 // Usage: specter watch [--every=6h] [scan flags...]; --notify is enabled by default.
 func runWatch(args []string) {
@@ -1044,6 +1116,7 @@ func printHelp() {
   ./specter leads list              View discovered technical leads
 
 🛠️ Standard Commands:
+  ./specter serve [--addr=127.0.0.1:8080] [--open]   Local web UI to search & filter jobs
   ./specter watch [--every=6h]             Re-scan on an interval and alert on new roles
   ./specter feeds [--source=remoteok,hn]   Ingest RemoteOK & Hacker News "Who is hiring?"
   ./specter scan [--target=<url>] [--github=<org>] [--force] [--sync-sheets]

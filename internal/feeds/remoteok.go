@@ -62,11 +62,12 @@ func (r *RemoteOK) Fetch(ctx context.Context) ([]*ats.CompanyMeta, error) {
 		jobs = append(jobs, feedJob{
 			company: j.Company,
 			job: ats.RawJob{
-				ID:          j.ID,
-				Title:       j.Position,
-				Department:  strings.Join(j.Tags, " "),
-				Location:    j.Location,
-				Workplace:   "remote", // RemoteOK lists remote roles only
+				ID:         j.ID,
+				Title:      j.Position,
+				Department: strings.Join(j.Tags, " "),
+				Location:   j.Location,
+				// No blanket "remote" hint: the listed location (e.g. "Redwood City") often
+				// restricts who can actually apply, so the classifier judges it as-is.
 				URL:         firstNonEmpty(j.ApplyURL, j.URL),
 				Description: j.Description,
 				PostedAt:    posted,

@@ -368,3 +368,37 @@ func TestSheetsSyncTracking(t *testing.T) {
 		t.Fatalf("expected count 1, got %d", count)
 	}
 }
+
+func TestRoleStatusRoundTrip(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+
+	if err := store.SetRoleStatus(ctx, "gh-1", StatusSaved); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetRoleStatus(ctx, "gh-1", StatusApplied); err != nil { // overwrite
+		t.Fatal(err)
+	}
+	if err := store.SetRoleStatus(ctx, "gh-2", StatusHidden); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.ListRoleStatuses(ctx)
+	if got["gh-1"] != StatusApplied || got["gh-2"] != StatusHidden || len(got) != 2 {
+		t.Errorf("statuses = %v", got)
+	}
+
+	if err := store.SetRoleStatus(ctx, "gh-2", ""); err != nil { // clear
+		t.Fatal(err)
+	}
+	got, _ = store.ListRoleStatuses(ctx)
+	if _, ok := got["gh-2"]; ok {
+		t.Error("status should be cleared")
+	}
+	if store.SetRoleStatus(ctx, "gh-1", "bogus") == nil || store.SetRoleStatus(ctx, "", StatusSaved) == nil {
+		t.Error("invalid input must be rejected")
+	}
+}
