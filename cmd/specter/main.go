@@ -32,7 +32,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const version = "1.3.0"
+// version is overridden at release time via -ldflags "-X main.version=...".
+var version = "1.3.0"
 
 // nonInteractive suppresses prompts (set by unattended modes such as `watch`).
 var nonInteractive bool

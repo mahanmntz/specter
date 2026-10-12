@@ -1,6 +1,6 @@
 # Specter ⚡
 
-**Specter** is a high-performance, autonomous CLI reconnaissance and engineering lead discovery engine written in pure Go (1.23+). Designed for engineering leaders, technical recruiters, founders, and global remote software engineers, Specter discovers high-signal backend hiring indicators, maps public ATS boards (Greenhouse, Lever, Ashby, direct portals), detects **worldwide contractor-friendly (sanction-resilient) positions with deep one-click application links**, mines public Git commit metadata and patch headers for verified contact emails, enforces provenance lineage, and produces date-stamped execution archives with delta tracking.
+**Specter** is a high-performance, autonomous CLI reconnaissance and engineering lead discovery engine written in pure Go (1.27+). Designed for engineering leaders, technical recruiters, founders, and global remote software engineers, Specter discovers high-signal backend hiring indicators, maps public ATS boards (Greenhouse, Lever, Ashby, direct portals), detects **worldwide contractor-friendly (sanction-resilient) positions with deep one-click application links**, mines public Git commit metadata and patch headers for verified contact emails, enforces provenance lineage, and produces date-stamped execution archives with delta tracking.
 
 ---
 
@@ -287,6 +287,19 @@ Edit `.env` to configure your environment variables:
 Feeds map postings into the same database, so `apply`, `roles`, `export` and `sync` work on them unchanged.
 
 Adding a source = one file in `internal/ats/` implementing `BoardAdapter`, plus a line in `NewRegistry`. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Install
+
+```bash
+# From source
+git clone https://github.com/mahanmntz/specter && cd specter && go build ./cmd/specter
+
+# Docker
+docker build -t specter .
+docker run --rm -v "$PWD/data:/data" --env-file .env specter watch --every=6h
+```
+
+Prebuilt binaries for Linux, macOS and Windows are attached to each [GitHub release](https://github.com/mahanmntz/specter/releases).
 
 ## Alerts & Scheduled Runs
 

@@ -12,7 +12,7 @@ go build ./...
 go test ./...
 ```
 
-Requires Go 1.23+.
+Requires Go 1.27+.
 
 ## Before opening a PR
 
