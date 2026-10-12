@@ -265,6 +265,22 @@ Edit `.env` to configure your environment variables:
 
 ---
 
+## Your Profile (`profile.json`)
+
+Specter scores and filters postings against *your* profile. Copy the example and edit it:
+
+```bash
+cp profile.example.json profile.json   # auto-loaded; or set SPECTER_PROFILE=/path/to/file.json
+```
+
+| Field | Purpose |
+|---|---|
+| `skills` | Skills used to compute the per-posting match percentage |
+| `keywords` | Tech keywords used to tag postings |
+| `role_include` / `role_exclude` | Title terms that make a role relevant / rule it out |
+
+Omitted fields keep the built-in backend-engineering defaults. `MY_SKILLS` in `.env` still works as a fallback for skills.
+
 ## Google Sheets Two-Tab Synchronization Setup
 
 Specter can stream discovered technical contacts and direct-apply job postings directly into a single Google Sheet organized into two synchronized tabs:

@@ -21,9 +21,32 @@ var BackendKeywords = []string{
 	"system design", "rest", "restful", "rest api", "full stack", "fullstack",
 }
 
+// Role title terms that mark a posting as relevant / irrelevant. Overridable via a profile file.
+var includeRoleTerms = []string{
+	"backend", "back-end", "distributed", "platform", "infrastructure",
+	"systems", "system", "core engine", "golang", "go engineer", "data engineer",
+	"site reliability", "sre", "cloud engineer", "software engineer",
+	"software developer", "full stack", "fullstack", "node", "nodejs",
+	"typescript", "python", "api engineer", "core contributor",
+	"member of technical staff", "technical staff", "mts", "storage",
+	"database", "kernel", "architect", "compiler", "protocols", "consensus",
+}
+
+var excludeRoleTerms = []string{
+	"pure frontend", "ui/ux", "sales", "marketing", "recruiter", "talent",
+	"account executive", "finance", "legal", "compliance", "product manager",
+	"designer", "hr business partner", "customer success", "operations manager",
+	"deal desk", "administrative", "copywriter", "office manager",
+}
+
 var wordBoundaryRegexes = make(map[string]*regexp.Regexp)
 
 func init() {
+	compileKeywords()
+}
+
+func compileKeywords() {
+	wordBoundaryRegexes = make(map[string]*regexp.Regexp, len(BackendKeywords))
 	for _, kw := range BackendKeywords {
 		wordBoundaryRegexes[kw] = regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(kw) + `\b`)
 	}
@@ -57,32 +80,15 @@ func IsBackendRole(title, department string) bool {
 		strings.Contains(combined, "software developer") ||
 		strings.Contains(combined, "systems engineer")
 
-	excludeTerms := []string{
-		"pure frontend", "ui/ux", "sales", "marketing", "recruiter", "talent",
-		"account executive", "finance", "legal", "compliance", "product manager",
-		"designer", "hr business partner", "customer success", "operations manager",
-		"deal desk", "administrative", "copywriter", "office manager",
-	}
-
 	if !isFullStackOrBackend {
-		for _, excl := range excludeTerms {
+		for _, excl := range excludeRoleTerms {
 			if strings.Contains(combined, excl) {
 				return false
 			}
 		}
 	}
 
-	backendTerms := []string{
-		"backend", "back-end", "distributed", "platform", "infrastructure",
-		"systems", "system", "core engine", "golang", "go engineer", "data engineer",
-		"site reliability", "sre", "cloud engineer", "software engineer",
-		"software developer", "full stack", "fullstack", "node", "nodejs",
-		"typescript", "python", "api engineer", "core contributor",
-		"member of technical staff", "technical staff", "mts", "storage",
-		"database", "kernel", "architect", "compiler", "protocols", "consensus",
-	}
-
-	for _, term := range backendTerms {
+	for _, term := range includeRoleTerms {
 		if strings.Contains(combined, term) {
 			return true
 		}
@@ -109,6 +115,9 @@ func ExtractSeniority(title string) string {
 
 // GetUserSkills returns user's configured skill profile from MY_SKILLS environment variable.
 func GetUserSkills() []string {
+	if len(profileSkills) > 0 {
+		return append([]string(nil), profileSkills...)
+	}
 	raw := os.Getenv("MY_SKILLS")
 	if strings.TrimSpace(raw) == "" {
 		raw = "Go, TypeScript, Node.js, NestJS, Express, Python, Backend, Distributed Systems, Microservices, System Design, PostgreSQL, Redis, MongoDB, RabbitMQ, Docker, Kubernetes, Linux, gRPC, REST, CI/CD, Software Engineer"

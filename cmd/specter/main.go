@@ -35,6 +35,20 @@ func main() {
 	// Auto-load .env configuration file if present
 	_ = config.LoadDotEnv()
 
+	// Optional user profile: SPECTER_PROFILE, or ./profile.json when present.
+	profilePath := os.Getenv("SPECTER_PROFILE")
+	if profilePath == "" {
+		if _, err := os.Stat("profile.json"); err == nil {
+			profilePath = "profile.json"
+		}
+	}
+	if profilePath != "" {
+		if err := signals.LoadProfile(profilePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed loading profile: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
 	if len(os.Args) < 2 {
 		printHelp()
 		os.Exit(0)

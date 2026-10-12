@@ -32,3 +32,6 @@ reports/latest
 # Generated reports may contain personal data
 reports/*.md
 !reports/.gitkeep
+
+# Personal profile
+/profile.json

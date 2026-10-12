@@ -1,0 +1,6 @@
+{
+  "skills": ["Go", "Python", "PostgreSQL", "Redis", "Kubernetes", "Distributed Systems"],
+  "keywords": ["golang", "python", "postgresql", "redis", "kubernetes", "kafka", "grpc", "distributed systems"],
+  "role_include": ["backend", "back-end", "platform", "infrastructure", "software engineer", "site reliability", "sre"],
+  "role_exclude": ["sales", "marketing", "recruiter", "designer", "product manager"]
+}
