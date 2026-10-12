@@ -3,90 +3,88 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Specter</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="top">
-    <div class="brand">⚡ Specter</div>
-    <input id="q" class="search" type="search" placeholder="Search title, company, location, tech…   ( / )" autocomplete="off">
-    <div id="meta" class="meta"></div>
-  </header>
-
-  <div class="layout">
-    <aside class="filters" id="filters">
-      <div class="group">
-        <div class="label">Show</div>
-        <div class="tabs" id="status-tabs">
-          <button data-status="active" class="on">Active</button>
-          <button data-status="new">Untriaged</button>
-          <button data-status="saved">Saved</button>
-          <button data-status="applied">Applied</button>
-          <button data-status="hidden">Hidden</button>
-          <button data-status="all">All</button>
+    <div class="top-inner">
+      <a class="brand" href="/" aria-label="Specter home"><span class="dot"></span>specter</a>
+      <label class="search">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M9 3a6 6 0 1 0 3.7 10.7l3.3 3.3 1-1-3.3-3.3A6 6 0 0 0 9 3Zm0 1.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/></svg>
+        <input id="q" type="search" placeholder="Search jobs" autocomplete="off" aria-label="Search jobs">
+        <kbd>/</kbd>
+      </label>
+      <button id="profile-chip" class="chip-btn" title="Edit your profile"></button>
+      <div class="run-group">
+        <button id="run" class="primary">Find jobs</button>
+        <button id="run-menu-btn" class="primary caret" aria-label="Scan depth" aria-haspopup="true">▾</button>
+        <div id="run-menu" class="menu" hidden>
+          <button data-mode="quick"><b>Quick scan</b><span>Top 25 companies · ~1 min</span></button>
+          <button data-mode="full"><b>Full scan</b><span>All companies · a few minutes</span></button>
         </div>
       </div>
+    </div>
+    <div id="runbar" class="runbar" hidden>
+      <div class="track"><div id="runfill" class="fill"></div></div>
+      <div class="runtext"><span id="runtext"></span><button id="cancel" class="link">Cancel</button></div>
+    </div>
+  </header>
 
-      <div class="group">
-        <label class="check"><input type="checkbox" id="global"> 🌍 Worldwide remote <span id="c-global" class="count"></span></label>
-        <label class="check"><input type="checkbox" id="contractor"> 🤝 Contractor-friendly <span id="c-contractor" class="count"></span></label>
-      </div>
-
-      <div class="group">
-        <label class="label" for="fresh">Posted</label>
-        <select id="fresh">
+  <main class="wrap">
+    <section class="filters" aria-label="Filters">
+      <div class="pills">
+        <button id="global" class="pill" aria-pressed="false">🌍 Worldwide</button>
+        <button id="contractor" class="pill" aria-pressed="false">🤝 Contractor</button>
+        <select id="fresh" class="pill select" aria-label="Posted">
           <option value="0">Any time</option>
-          <option value="1">Last 24 hours</option>
-          <option value="3">Last 3 days</option>
-          <option value="7">Last 7 days</option>
-          <option value="30">Last 30 days</option>
+          <option value="1">Past 24h</option>
+          <option value="3">Past 3 days</option>
+          <option value="7">Past week</option>
+          <option value="30">Past month</option>
+        </select>
+        <button id="more-toggle" class="pill" aria-expanded="false">More filters</button>
+        <button id="reset" class="link" hidden>Clear</button>
+      </div>
+      <div id="more" class="more" hidden>
+        <div class="row-label">Level</div>
+        <div id="levels" class="pills"></div>
+        <div class="row-label">Skill match</div>
+        <select id="min_score" class="pill select" aria-label="Minimum skill match">
+          <option value="0">Any</option><option value="45">45%+</option><option value="65">65%+</option><option value="80">80%+</option>
+        </select>
+        <div class="row-label">Company</div>
+        <input id="company" class="text" type="search" placeholder="e.g. stripe" autocomplete="off">
+        <div class="row-label">Tech <span class="hint">(must include all)</span></div>
+        <div id="keywords" class="pills"></div>
+      </div>
+    </section>
+
+    <div class="listhead">
+      <div id="tabs" class="seg" role="tablist">
+        <button data-status="active" class="on">Jobs</button>
+        <button data-status="saved">Saved</button>
+        <button data-status="applied">Applied</button>
+        <button data-status="hidden">Hidden</button>
+      </div>
+      <div class="rhs">
+        <span id="count" class="muted"></span>
+        <select id="sort" class="plain" aria-label="Sort">
+          <option value="best">Best match</option>
+          <option value="newest">Newest</option>
+          <option value="company">Company</option>
         </select>
       </div>
+    </div>
 
-      <div class="group">
-        <label class="label" for="min_score">Skill match</label>
-        <select id="min_score">
-          <option value="0">Any</option>
-          <option value="45">45%+</option>
-          <option value="65">65%+</option>
-          <option value="80">80%+</option>
-        </select>
-      </div>
+    <div id="list" class="list"></div>
+    <button id="loadmore" class="more-btn" hidden>Show more</button>
+    <div id="empty" class="empty" hidden></div>
+  </main>
 
-      <div class="group">
-        <div class="label">Seniority</div>
-        <div id="seniority" class="stack"></div>
-      </div>
-
-      <div class="group">
-        <label class="label" for="company">Company</label>
-        <input id="company" type="search" placeholder="e.g. stripe" autocomplete="off">
-      </div>
-
-      <div class="group">
-        <div class="label">Tech (all selected)</div>
-        <div id="keywords" class="chips"></div>
-      </div>
-
-      <button id="reset" class="ghost">Reset filters</button>
-    </aside>
-
-    <main>
-      <div class="bar">
-        <div id="count" class="count-line"></div>
-        <label>Sort
-          <select id="sort">
-            <option value="best">Best match</option>
-            <option value="newest">Newest</option>
-            <option value="company">Company A–Z</option>
-          </select>
-        </label>
-      </div>
-      <div id="list" class="list"></div>
-      <button id="more" class="more" hidden>Load more</button>
-      <div id="empty" class="empty" hidden></div>
-    </main>
-  </div>
+  <dialog id="setup" aria-labelledby="setup-title"></dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
 
   <script src="app.js"></script>
 </body>

@@ -6,10 +6,12 @@ func resetProfile(t *testing.T) {
 	t.Helper()
 	profileMu.Lock()
 	origKw, origInc, origExc, origSkills := BackendKeywords, includeRoleTerms, excludeRoleTerms, profileSkills
+	origBlock := blockRoleTerms
 	profileMu.Unlock()
 	t.Cleanup(func() {
 		profileMu.Lock()
 		BackendKeywords, includeRoleTerms, excludeRoleTerms, profileSkills = origKw, origInc, origExc, origSkills
+		blockRoleTerms = origBlock
 		compileKeywords()
 		profileMu.Unlock()
 	})
@@ -24,7 +26,7 @@ func TestPresetsAreComplete(t *testing.T) {
 		seen[p.ID] = true
 		// ApplyProfile only overrides non-empty fields, so every preset must fill all four.
 		pr := p.Profile
-		if len(pr.Skills) == 0 || len(pr.Keywords) == 0 || len(pr.RoleInclude) == 0 || len(pr.RoleExclude) == 0 {
+		if len(pr.Skills) == 0 || len(pr.Keywords) == 0 || len(pr.RoleInclude) == 0 || len(pr.RoleExclude) == 0 || len(pr.RoleBlock) == 0 {
 			t.Errorf("preset %s leaves a profile field empty", p.ID)
 		}
 	}
@@ -58,6 +60,16 @@ func TestSwitchingPresetChangesMatching(t *testing.T) {
 	}
 	if kws := MatchBackendKeywords("Build SwiftUI apps"); len(kws) == 0 {
 		t.Error("mobile keywords not applied")
+	}
+
+	apply("frontend")
+	if !IsBackendRole("Senior Frontend Engineer", "") || !IsBackendRole("Software Engineer, Web", "") {
+		t.Error("frontend preset should accept frontend and generic software engineer titles")
+	}
+	for _, title := range []string{"Backend Software Engineer", "Software Engineer, Backend", "Senior iOS Engineer", "Site Reliability Engineer"} {
+		if IsBackendRole(title, "Engineering") {
+			t.Errorf("frontend preset must block %q", title)
+		}
 	}
 
 	apply("devops")

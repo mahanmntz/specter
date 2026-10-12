@@ -18,6 +18,9 @@ type Profile struct {
 	RoleInclude []string `json:"role_include"`
 	// RoleExclude replaces the title terms that rule a posting out.
 	RoleExclude []string `json:"role_exclude"`
+	// RoleBlock lists title terms that always rule a posting out (e.g. "ios" for a backend search),
+	// even when the title also contains an include term such as "software engineer".
+	RoleBlock []string `json:"role_block"`
 }
 
 var profileSkills []string
@@ -53,6 +56,9 @@ func ApplyProfile(p Profile) {
 	}
 	if r := cleanList(p.RoleExclude); len(r) > 0 {
 		excludeRoleTerms = lowerAll(r)
+	}
+	if r := cleanList(p.RoleBlock); len(r) > 0 {
+		blockRoleTerms = lowerAll(r)
 	}
 }
 

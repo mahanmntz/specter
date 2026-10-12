@@ -33,6 +33,9 @@ var includeRoleTerms = []string{
 	"database", "kernel", "architect", "compiler", "protocols", "consensus",
 }
 
+// blockRoleTerms reject a posting by title regardless of other matches (empty by default).
+var blockRoleTerms []string
+
 var excludeRoleTerms = []string{
 	"pure frontend", "ui/ux", "sales", "marketing", "recruiter", "talent",
 	"account executive", "finance", "legal", "compliance", "product manager",
@@ -78,6 +81,12 @@ func MatchBackendKeywords(text string) []string {
 func IsBackendRole(title, department string) bool {
 	profileMu.RLock()
 	defer profileMu.RUnlock()
+	lowerTitle := strings.ToLower(title)
+	for _, blocked := range blockRoleTerms {
+		if strings.Contains(lowerTitle, blocked) {
+			return false
+		}
+	}
 	combined := strings.ToLower(title + " " + department)
 
 	isFullStackOrBackend := strings.Contains(combined, "full stack") ||

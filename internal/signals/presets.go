@@ -19,9 +19,9 @@ var nonEngineeringTerms = []string{
 	"deal desk", "administrative", "copywriter", "office manager",
 }
 
-func preset(id, label, emoji, blurb string, skills, keywords, include []string) Preset {
+func preset(id, label, emoji, blurb string, skills, keywords, include, block []string) Preset {
 	return Preset{ID: id, Label: label, Emoji: emoji, Blurb: blurb, Profile: Profile{
-		Skills: skills, Keywords: keywords, RoleInclude: include, RoleExclude: nonEngineeringTerms,
+		Skills: skills, Keywords: keywords, RoleInclude: include, RoleExclude: nonEngineeringTerms, RoleBlock: block,
 	}}
 }
 
@@ -41,36 +41,43 @@ var presets = []Preset{
 			"system design", "rest", "restful", "rest api", "full stack", "fullstack",
 		},
 		RoleInclude: includeRoleTerms, RoleExclude: nonEngineeringTerms,
+		RoleBlock: []string{"frontend", "front-end", "front end", "ios", "android", "mobile", "machine learning", "ml engineer", "data scientist", "designer"},
 	}},
 	preset("fullstack", "Full-stack", "🧩", "Product engineering across the stack",
 		[]string{"TypeScript", "React", "Node.js", "PostgreSQL", "GraphQL", "REST", "Docker"},
 		[]string{"typescript", "javascript", "react", "node.js", "nodejs", "next.js", "nextjs", "nestjs", "express", "graphql",
 			"postgres", "postgresql", "python", "django", "rails", "ruby", "rest", "redis", "docker", "aws", "full stack", "fullstack"},
-		[]string{"full stack", "fullstack", "full-stack", "software engineer", "software developer", "web developer", "product engineer", "frontend", "backend"}),
+		[]string{"full stack", "fullstack", "full-stack", "software engineer", "software developer", "web developer", "product engineer", "frontend", "backend"},
+		[]string{"ios engineer", "ios developer", "android", "mobile", "machine learning", "ml engineer", "data engineer", "devops", "site reliability", "sre"}),
 	preset("frontend", "Frontend", "🎨", "UI, web apps, design systems",
 		[]string{"React", "TypeScript", "JavaScript", "CSS", "Next.js", "GraphQL", "Accessibility"},
 		[]string{"react", "vue", "angular", "svelte", "typescript", "javascript", "css", "html", "next.js", "nextjs", "tailwind",
 			"webpack", "vite", "redux", "graphql", "accessibility", "web components", "frontend", "front-end"},
-		[]string{"frontend", "front-end", "front end", "ui engineer", "web developer", "web engineer", "design engineer", "product engineer", "full stack", "fullstack", "software engineer"}),
+		[]string{"frontend", "front-end", "front end", "ui engineer", "web developer", "web engineer", "design engineer", "product engineer", "full stack", "fullstack", "software engineer"},
+		[]string{"backend", "back-end", "devops", "site reliability", "sre", "data engineer", "machine learning", "ml engineer", "ios", "android", "mobile"}),
 	preset("devops", "DevOps / SRE", "🛠️", "Infrastructure, reliability, platforms",
 		[]string{"Kubernetes", "Terraform", "AWS", "Docker", "CI/CD", "Linux", "Prometheus"},
 		[]string{"kubernetes", "terraform", "aws", "gcp", "azure", "docker", "ci/cd", "prometheus", "grafana", "ansible", "helm",
 			"linux", "observability", "sre", "devops", "infrastructure as code", "argocd", "istio"},
-		[]string{"devops", "sre", "site reliability", "platform", "infrastructure", "cloud engineer", "systems engineer", "reliability", "production engineer", "release engineer"}),
+		[]string{"devops", "sre", "site reliability", "platform", "infrastructure", "cloud engineer", "systems engineer", "reliability", "production engineer", "release engineer"},
+		[]string{"frontend", "front-end", "ios", "android", "mobile", "machine learning", "ml engineer", "data scientist"}),
 	preset("data", "Data Engineering", "📊", "Pipelines, warehouses, analytics",
 		[]string{"Python", "SQL", "Spark", "Airflow", "dbt", "Kafka", "Snowflake"},
 		[]string{"spark", "airflow", "dbt", "kafka", "snowflake", "bigquery", "sql", "python", "etl", "data pipeline", "redshift",
 			"flink", "databricks", "clickhouse", "data warehouse"},
-		[]string{"data engineer", "data platform", "analytics engineer", "data infrastructure", "big data", "data engineering"}),
+		[]string{"data engineer", "data platform", "analytics engineer", "data infrastructure", "big data", "data engineering"},
+		[]string{"frontend", "front-end", "ios", "android", "mobile", "devops", "site reliability"}),
 	preset("ml", "ML / AI", "🧠", "Models, LLMs, ML infrastructure",
 		[]string{"Python", "PyTorch", "Machine Learning", "LLMs", "MLOps"},
 		[]string{"pytorch", "tensorflow", "machine learning", "deep learning", "llm", "nlp", "computer vision", "mlops",
 			"transformers", "python", "cuda", "jax", "scikit-learn", "hugging face", "rag"},
-		[]string{"machine learning", "ml engineer", "ai engineer", "applied scientist", "research engineer", "mlops", "data scientist", "deep learning", "nlp", "computer vision", "llm"}),
+		[]string{"machine learning", "ml engineer", "ai engineer", "applied scientist", "research engineer", "mlops", "data scientist", "deep learning", "nlp", "computer vision", "llm"},
+		[]string{"frontend", "front-end", "ios", "android", "mobile", "devops", "site reliability", "sre"}),
 	preset("mobile", "Mobile", "📱", "iOS, Android, cross-platform",
 		[]string{"Swift", "Kotlin", "iOS", "Android", "React Native", "Flutter"},
 		[]string{"swift", "swiftui", "kotlin", "jetpack compose", "react native", "flutter", "ios", "android", "objective-c", "xcode", "mobile"},
-		[]string{"ios engineer", "ios developer", "android engineer", "android developer", "mobile engineer", "mobile developer", "react native", "flutter", "swift", "kotlin", "mobile"}),
+		[]string{"ios engineer", "ios developer", "android engineer", "android developer", "mobile engineer", "mobile developer", "react native", "flutter", "swift", "kotlin", "mobile"},
+		[]string{"backend", "back-end", "devops", "site reliability", "sre", "data engineer", "machine learning", "ml engineer"}),
 }
 
 // Presets returns every built-in role preset (a defensive copy).

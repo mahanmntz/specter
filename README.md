@@ -268,15 +268,23 @@ Edit `.env` to configure your environment variables:
 ## Local Web UI
 
 ```bash
-./specter run            # find jobs
-./specter serve --open   # browse them at http://127.0.0.1:8080
+./specter serve --open
 ```
+
+First launch asks what kind of work you want: pick a role (Backend, Full-stack, Frontend, DevOps/SRE, Data, ML/AI, Mobile), tweak your skills, and press **Find my jobs**. Specter searches the company catalog plus RemoteOK and Hacker News in the background, with live progress, and fills the page as it goes. Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
 
 ![Specter web UI](docs/ui.png)
 
-Search and filter everything Specter found: worldwide-remote, contractor-friendly, posted-within, seniority, tech stack, company and skill-match. Mark jobs **Saved / Applied / Hidden** (stored only in your local database) and click **Apply** to open the job's application page. Filters live in the URL, so you can bookmark a search. Press `/` to jump to the search box.
+- **Filters:** worldwide remote, contractor-friendly, posted-within, level, tech stack, company, minimum skill match; filters live in the URL so searches can be bookmarked. Press `/` to search.
+- **Triage:** Save, mark Applied, or Hide jobs (kept only in your local database), then click **Apply** to open the job's own application page.
+- **Personalized:** your role and skills decide which postings are kept and how each job is scored ("80% match").
+- **Private:** runs entirely on your machine, binds to loopback only, has no accounts or telemetry, and refuses other addresses unless you pass `--allow-remote` (it has no authentication).
 
-The UI runs entirely on your machine, binds to loopback only, makes no external requests, and refuses to bind elsewhere unless you pass `--allow-remote` (it has no authentication).
+<details><summary>First-run setup</summary>
+
+![Setup](docs/setup.png)
+
+</details>
 
 ## Supported Job Sources
 
