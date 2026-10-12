@@ -20,6 +20,7 @@ import (
 	"specter/internal/crawler"
 	"specter/internal/exporter"
 	"specter/internal/reporter"
+	"specter/internal/scanner"
 	"specter/internal/seeds"
 	"specter/internal/signals"
 	"specter/internal/storage"
@@ -297,102 +298,34 @@ func runScan(args []string) {
 	var g errgroup.Group
 	g.SetLimit(*concurrency)
 
+	sc := &scanner.Scanner{
+		Ingester:  registry,
+		Miner:     miner,
+		Frontier:  frontier,
+		Store:     store,
+		Observer:  tracker,
+		MineLeads: *mineLeads,
+		TTL:       crawlTTL,
+		Report: func(ctx context.Context, domain string) (string, error) {
+			reportCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			return reporter.GenerateMarkdownReport(reportCtx, store, domain, runDir)
+		},
+	}
+
 	for _, s := range targetSeeds {
 		seed := s
 		g.Go(func() error {
 			if ctx.Err() != nil {
 				return nil
 			}
-
-			tracker.SetCurrentTarget(seed.ATSBoardID)
-			apiURL := formatSeedAPIURL(seed)
-
-			// Frontier Deduplication Check
-			shouldCrawlDomain, _ := frontier.ShouldCrawlDomain(seed.Domain, crawlTTL)
-			shouldCrawlAPI, _ := frontier.ShouldCrawl(apiURL, crawlTTL)
-
-			if !shouldCrawlDomain && !shouldCrawlAPI {
-				tracker.IncCrawled()
-				tracker.Log("♻️  [FRONTIER] %s (%s) crawled recently. Skipping.", seed.Name, seed.Domain)
-				_, _ = reporter.GenerateMarkdownReport(ctx, store, seed.Domain, runDir)
+			res, err := sc.ProcessSeed(ctx, seed)
+			if err != nil {
+				tracker.Log("⚠️  %s: %v", seed.Name, err)
 				return nil
 			}
-
-			// A. Ingest ATS
-			meta, err := registry.ExtractBySeed(ctx, seed)
-			_ = frontier.MarkVisited(apiURL, "ats_"+seed.ATSService, err)
-			tracker.IncCrawled()
-
-			if err != nil {
-				tracker.Log("⚠️  ATS extraction error for %s (%s): %v", seed.Name, seed.ATSBoardID, err)
-			} else if meta != nil {
-				if seed.GitHubOrg != "" && meta.GitHubOrg == "" {
-					meta.GitHubOrg = seed.GitHubOrg
-				}
-				_, newRoles, saveErr := store.SaveCompanyAndRoles(ctx, meta)
-				if saveErr != nil {
-					tracker.Log("⚠️  Database write error for %s: %v", seed.Name, saveErr)
-				} else {
-					totalNewRoles.Add(int64(newRoles))
-					tracker.Log("✅ %s: %d backend roles matching signals (%d new)", seed.Name, len(meta.OpenRoles), newRoles)
-				}
-			}
-
-			if meta == nil {
-				meta = &ats.CompanyMeta{
-					Name:      seed.Name,
-					Domain:    seed.Domain,
-					GitHubOrg: seed.GitHubOrg,
-				}
-			}
-
-			// B. Git Contributor Mining
-			targetOrg := seed.GitHubOrg
-			if targetOrg == "" && meta.GitHubOrg != "" {
-				targetOrg = meta.GitHubOrg
-			}
-
-			if *mineLeads && targetOrg != "" && ctx.Err() == nil {
-				gitKey := "github:" + targetOrg
-				shouldMine, _ := frontier.ShouldCrawl(gitKey, crawlTTL)
-
-				if !shouldMine {
-					tracker.Log("♻️  [FRONTIER] GitHub org @%s visited recently.", targetOrg)
-				} else {
-					leads, mineErr := miner.MineOrganization(ctx, targetOrg, seed.Domain, func(msg string) {
-						tracker.Log("   [%s] %s", targetOrg, msg)
-					})
-					_ = frontier.MarkVisited(gitKey, "github_org", mineErr)
-
-					if mineErr != nil {
-						tracker.Log("⚠️  GitHub mining warning for @%s: %v", targetOrg, mineErr)
-					} else {
-						validEmails := 0
-						for _, l := range leads {
-							if l.Email != "" {
-								validEmails++
-							}
-						}
-						newLeads, _ := store.SaveEngineeringLeads(ctx, leads)
-						totalNewLeads.Add(int64(newLeads))
-						tracker.IncLeads(len(leads))
-						tracker.IncEmails(validEmails)
-						if len(leads) > 0 {
-							tracker.Log("🎯 @%s: Discovered %d leads (%d verified emails, %d new saved)",
-								targetOrg, len(leads), validEmails, newLeads)
-						}
-					}
-				}
-			}
-
-			// C. Markdown Dossier Compilation into runDir
-			reportCtx, reportCancel := context.WithTimeout(context.Background(), 3*time.Second)
-			reportPath, rErr := reporter.GenerateMarkdownReport(reportCtx, store, seed.Domain, runDir)
-			reportCancel()
-			if rErr == nil && reportPath != "" {
-				tracker.Log("📄 Saved dossier: %s", reportPath)
-			}
-
+			totalNewRoles.Add(int64(res.NewRoles))
+			totalNewLeads.Add(int64(res.NewLeads))
 			return nil
 		})
 	}
@@ -516,19 +449,6 @@ func runScan(args []string) {
 	}
 
 	printCatalogSummary(store)
-}
-
-func formatSeedAPIURL(seed seeds.SeedTarget) string {
-	switch strings.ToLower(seed.ATSService) {
-	case "greenhouse":
-		return fmt.Sprintf("https://boards-api.greenhouse.io/v1/boards/%s/jobs", seed.ATSBoardID)
-	case "lever":
-		return fmt.Sprintf("https://api.lever.co/v0/postings/%s", seed.ATSBoardID)
-	case "ashby":
-		return fmt.Sprintf("https://api.ashbyhq.com/posting-api/job-board/%s", seed.ATSBoardID)
-	default:
-		return "https://" + seed.Domain
-	}
 }
 
 func detectATSTypeAndBoard(target string) (string, string) {
