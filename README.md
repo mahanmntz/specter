@@ -301,6 +301,15 @@ docker run --rm -v "$PWD/data:/data" --env-file .env specter watch --every=6h
 
 Prebuilt binaries for Linux, macOS and Windows are attached to each [GitHub release](https://github.com/mahanmntz/specter/releases).
 
+## Airtable & Notion
+
+```bash
+./specter sync airtable --global-only    # needs AIRTABLE_TOKEN, AIRTABLE_BASE
+./specter sync notion --fresh-only       # needs NOTION_TOKEN, NOTION_DATABASE_ID
+```
+
+Pushes are idempotent (keyed by role ID). Create these fields first: **Airtable** table `Jobs` with `ID`, `Title`, `Company`, `Location`, `Department`, `Seniority`, `Remote`, `Keywords`, `URL`, `Posted` (text/URL/date). **Notion** database with `Name` (title), `ID`, `Company`, `Location`, `Remote`, `Keywords` (text) and `URL` (url), shared with your integration.
+
 ## Alerts & Scheduled Runs
 
 Set any of `SPECTER_WEBHOOK_URL` (generic JSON), `SPECTER_SLACK_WEBHOOK`, or `SPECTER_TELEGRAM_TOKEN` + `SPECTER_TELEGRAM_CHAT` in `.env`, then:

@@ -1047,6 +1047,7 @@ func printHelp() {
   ./specter watch [--every=6h]             Re-scan on an interval and alert on new roles
   ./specter feeds [--source=remoteok,hn]   Ingest RemoteOK & Hacker News "Who is hiring?"
   ./specter scan [--target=<url>] [--github=<org>] [--force] [--sync-sheets]
+  ./specter sync airtable|notion [--global-only] [--fresh-only] [--limit=200]
   ./specter sync sheets [--target=all|leads|jobs] [--global-only] [--all] [--dry-run]
   ./specter apply [--global-only] [--fresh-only] [--domain=<domain>] [--export]
   ./specter leads list [--domain=<domain>] [--uncontacted]

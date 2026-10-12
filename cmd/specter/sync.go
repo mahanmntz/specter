@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"specter/internal/sinks"
 	"specter/internal/storage"
 	"specter/internal/sync"
 )
@@ -21,13 +22,15 @@ func runSync(args []string) {
 	switch subcommand {
 	case "sheets":
 		runSyncSheets(args[1:])
+	case "airtable", "notion":
+		runSyncSink(subcommand, args[1:])
 	default:
 		// If user passed flags directly like `specter sync --all`
 		if len(subcommand) > 0 && subcommand[0] == '-' {
 			runSyncSheets(args)
 			return
 		}
-		fmt.Fprintf(os.Stderr, "Unknown sync target %q. Supported targets: 'sheets'\n", subcommand)
+		fmt.Fprintf(os.Stderr, "Unknown sync target %q. Supported targets: 'sheets', 'airtable', 'notion'\n", subcommand)
 		fmt.Fprintln(os.Stderr, "Usage: specter sync sheets [--target=all|leads|jobs] [--webhook=<url>] [--all] [--limit=100] [--dry-run]")
 		os.Exit(1)
 	}
@@ -85,4 +88,56 @@ func runSyncSheets(args []string) {
 	if res.TotalProcessed == 0 {
 		fmt.Println("[SYNC] No records waiting to sync. Use --all to re-push.")
 	}
+}
+
+// runSyncSink pushes jobs to Airtable or Notion (credentials come from the environment).
+func runSyncSink(name string, args []string) {
+	fs := flag.NewFlagSet("sync "+name, flag.ExitOnError)
+	globalOnly := fs.Bool("global-only", false, "Only push worldwide / contractor-friendly remote jobs")
+	freshOnly := fs.Bool("fresh-only", false, "Only push roles first seen in the latest run")
+	limit := fs.Int("limit", 200, "Maximum number of jobs to push (0 = all)")
+	dbPath := fs.String("db", "specter.db", "SQLite database path")
+	fs.Parse(args)
+
+	var (
+		sink sinks.Sink
+		err  error
+	)
+	if name == "airtable" {
+		sink, err = sinks.NewAirtableFromEnv()
+	} else {
+		sink, err = sinks.NewNotionFromEnv()
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "❌ [%s] %v\n", strings.ToUpper(name), err)
+		os.Exit(1)
+	}
+
+	store, err := storage.NewStore(*dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Database error: %v\n", err)
+		os.Exit(1)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+	jobs, err := store.ListDirectApplyRoles(ctx, storage.DirectApplyFilter{GlobalOnly: *globalOnly, FreshOnly: *freshOnly})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Database error: %v\n", err)
+		os.Exit(1)
+	}
+	if *limit > 0 && len(jobs) > *limit {
+		jobs = jobs[:*limit]
+	}
+	if len(jobs) == 0 {
+		fmt.Println("[SYNC] No matching jobs to push.")
+		return
+	}
+
+	n, err := sink.Push(ctx, jobs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "\n❌ [%s] pushed %d/%d before error: %v\n", strings.ToUpper(name), n, len(jobs), err)
+		os.Exit(1)
+	}
+	fmt.Printf("✅ [%s] pushed %d job(s)\n", strings.ToUpper(name), n)
 }
