@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/mahanmntz/specter/internal/runner"
+	"github.com/mahanmntz/specter/internal/scanner"
 	"github.com/mahanmntz/specter/internal/seeds"
 	"github.com/mahanmntz/specter/internal/signals"
 )
@@ -123,7 +125,7 @@ func runServer(t *testing.T, run RunFunc) (*Server, *fakeSource) {
 	s := New(src, Options{Run: run, Seeds: func() ([]seeds.SeedTarget, error) {
 		out := make([]seeds.SeedTarget, 40)
 		for i := range out {
-			out[i] = seeds.SeedTarget{Name: "c", Domain: "c.com", Priority: 1}
+			out[i] = seeds.SeedTarget{Name: "c", Domain: "c.com", ATSService: "greenhouse", Priority: 1}
 		}
 		return out, nil
 	}})
@@ -236,4 +238,55 @@ func TestRunRequiresProfileAndRunner(t *testing.T) {
 	if rec := do(t, s2.Handler(), "POST", "/api/run", ""); rec.Code != http.StatusNotImplemented {
 		t.Errorf("no runner → %d, want 501", rec.Code)
 	}
+}
+
+func TestRunExposesPlanActiveAndIncrementalEvents(t *testing.T) {
+	proceed := make(chan struct{})
+	release := make(chan struct{})
+	s, _ := runServer(t, func(ctx context.Context, opts runner.Options, obs *Progress) (runner.Result, error) {
+		obs.Emit(scanner.Event{Kind: "company", Name: "Acme", Source: "greenhouse", Status: scanner.StatusRunning})
+		obs.Emit(scanner.Event{Kind: "company", Name: "Beta", Source: "lever", Status: scanner.StatusFailed, Error: "board not found (404)"})
+		close(proceed)
+		<-release
+		obs.Emit(scanner.Event{Kind: "company", Name: "Acme", Source: "greenhouse", Status: scanner.StatusOK, Roles: 5, New: 2})
+		obs.Emit(scanner.Event{Kind: "feed", Name: "hn", Source: "feed", Status: scanner.StatusEmpty})
+		return runner.Result{}, nil
+	})
+	h := s.Handler()
+	do(t, h, "POST", "/api/run", `{"mode":"quick"}`)
+	<-proceed
+
+	st := status(t, h)
+	if len(st.Plan) == 0 || !hasPlan(st.Plan, "greenhouse") || !hasPlan(st.Plan, "remoteok") {
+		t.Errorf("plan should list the ATS groups and the feeds before work finishes: %+v", st.Plan)
+	}
+	if len(st.Active) != 1 || st.Active[0].Name != "Acme" {
+		t.Errorf("active = %+v", st.Active)
+	}
+	if len(st.Events) != 1 || st.Events[0].Status != scanner.StatusFailed || st.Events[0].Error == "" || st.Counts[scanner.StatusFailed] != 1 {
+		t.Errorf("events=%+v counts=%v", st.Events, st.Counts)
+	}
+	firstSeq := st.Seq
+
+	close(release)
+	waitFor(t, func() bool { return status(t, h).State == RunDone })
+
+	// Only events after `since` are returned, so the UI can poll cheaply.
+	var inc RunStatus
+	_ = json.Unmarshal(do(t, h, "GET", "/api/run?since="+strconv.Itoa(firstSeq), "").Body.Bytes(), &inc)
+	if len(inc.Events) != 2 || inc.Events[0].Name != "Acme" || inc.Events[0].Roles != 5 || inc.Roles != 5 || len(inc.Active) != 0 {
+		t.Errorf("incremental = %+v", inc)
+	}
+	if inc.Counts[scanner.StatusOK] != 1 || inc.Counts[scanner.StatusEmpty] != 1 {
+		t.Errorf("counts = %v", inc.Counts)
+	}
+}
+
+func hasPlan(plan []PlanItem, source string) bool {
+	for _, p := range plan {
+		if p.Source == source {
+			return true
+		}
+	}
+	return false
 }

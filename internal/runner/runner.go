@@ -118,14 +118,27 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 			}
 			if skip, why := tooSoon(ctx, store, feed); skip {
 				obs.Log("⏭️  %s: %s", feed.Name(), why)
+				if es, ok := obs.(scanner.EventSink); ok {
+					es.Emit(scanner.Event{Kind: "feed", Name: feed.Name(), Source: "feed", Status: scanner.StatusSkipped, Error: "fetched recently (provider rate limit)"})
+				}
 				continue
 			}
 			obs.SetCurrentTarget(feed.Name())
+			emit := func(e scanner.Event) {
+				if es, ok := obs.(scanner.EventSink); ok {
+					e.Kind, e.Name, e.Source = "feed", feed.Name(), "feed"
+					es.Emit(e)
+				}
+			}
+			started := time.Now()
+			emit(scanner.Event{Status: scanner.StatusRunning})
 			metas, err := feed.Fetch(ctx)
 			if err != nil {
 				obs.Log("⚠️  %s: %v", feed.Name(), err)
+				emit(scanner.Event{Status: scanner.StatusFailed, Error: err.Error(), Millis: time.Since(started).Milliseconds()})
 				continue
 			}
+			roleCount := 0
 			added := 0
 			for _, meta := range metas {
 				_, n, saveErr := store.SaveCompanyAndRoles(ctx, meta)
@@ -134,7 +147,13 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 					continue
 				}
 				added += n
+				roleCount += len(meta.OpenRoles)
 			}
+			status := scanner.StatusOK
+			if roleCount == 0 {
+				status = scanner.StatusEmpty
+			}
+			emit(scanner.Event{Status: status, Roles: roleCount, New: added, Millis: time.Since(started).Milliseconds()})
 			markFetched(ctx, store, feed)
 			result.FeedRoles += added
 			result.NewRoles += added

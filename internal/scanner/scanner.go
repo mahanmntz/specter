@@ -45,6 +45,36 @@ type Observer interface {
 	Log(format string, args ...any)
 }
 
+// Event describes one step of a scan for live display.
+type Event struct {
+	Kind   string `json:"kind"`            // "company" or "feed"
+	Name   string `json:"name"`            // company or feed name
+	Source string `json:"source"`          // greenhouse, lever, ashby, remoteok…
+	Status string `json:"status"`          // running, ok, empty, failed, skipped
+	Roles  int    `json:"roles,omitempty"` // matching roles found
+	New    int    `json:"new,omitempty"`   // of which new
+	Error  string `json:"error,omitempty"` // why it failed
+	Millis int64  `json:"ms,omitempty"`    // how long it took
+}
+
+// Event statuses.
+const (
+	StatusRunning = "running"
+	StatusOK      = "ok"
+	StatusEmpty   = "empty" // reached the source, but no role matched
+	StatusFailed  = "failed"
+	StatusSkipped = "skipped"
+)
+
+// EventSink is an optional extension of Observer that receives structured events.
+type EventSink interface{ Emit(Event) }
+
+func (s *Scanner) emit(e Event) {
+	if es, ok := s.Observer.(EventSink); ok {
+		es.Emit(e)
+	}
+}
+
 // Scanner runs the pipeline for individual seeds.
 type Scanner struct {
 	Ingester Ingester
@@ -83,6 +113,7 @@ func (s *Scanner) ProcessSeed(ctx context.Context, seed seeds.SeedTarget) (Resul
 	}
 
 	if !crawlDomain && !crawlAPI {
+		s.emit(Event{Kind: "company", Name: seed.Name, Source: seed.ATSService, Status: StatusSkipped, Error: "checked recently"})
 		s.Observer.IncCrawled()
 		s.Observer.Log("♻️  [FRONTIER] %s (%s) crawled recently. Skipping.", seed.Name, seed.Domain)
 		s.report(ctx, seed.Domain)
@@ -90,14 +121,18 @@ func (s *Scanner) ProcessSeed(ctx context.Context, seed seeds.SeedTarget) (Resul
 		return res, nil
 	}
 
+	started := time.Now()
+	s.emit(Event{Kind: "company", Name: seed.Name, Source: seed.ATSService, Status: StatusRunning})
 	meta, err := s.Ingester.ExtractBySeed(ctx, seed)
 	if mErr := s.Frontier.MarkVisited(apiURL, "ats_"+seed.ATSService, err); mErr != nil {
 		s.Observer.Log("⚠️  Frontier update failed for %s: %v", seed.Name, mErr)
 	}
 	s.Observer.IncCrawled()
 
+	ev := Event{Kind: "company", Name: seed.Name, Source: seed.ATSService, Millis: time.Since(started).Milliseconds()}
 	switch {
 	case err != nil:
+		ev.Status, ev.Error = StatusFailed, err.Error()
 		s.Observer.Log("⚠️  ATS extraction error for %s (%s): %v", seed.Name, seed.ATSBoardID, err)
 	case meta != nil:
 		if seed.GitHubOrg != "" && meta.GitHubOrg == "" {
@@ -108,9 +143,18 @@ func (s *Scanner) ProcessSeed(ctx context.Context, seed seeds.SeedTarget) (Resul
 			s.Observer.Log("⚠️  Database write error for %s: %v", seed.Name, saveErr)
 		} else {
 			res.NewRoles = newRoles
+			ev.Roles, ev.New = len(meta.OpenRoles), newRoles
 			s.Observer.Log("✅ %s: %d backend roles matching signals (%d new)", seed.Name, len(meta.OpenRoles), newRoles)
 		}
 	}
+
+	if ev.Status == "" {
+		ev.Status = StatusOK
+		if ev.Roles == 0 {
+			ev.Status = StatusEmpty
+		}
+	}
+	s.emit(ev)
 
 	if meta == nil {
 		meta = &ats.CompanyMeta{Name: seed.Name, Domain: seed.Domain, GitHubOrg: seed.GitHubOrg}

@@ -6,6 +6,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mahanmntz/specter/internal/cvparse"
@@ -64,7 +67,29 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, s.progress.Status())
+	since, _ := strconv.Atoi(r.URL.Query().Get("since"))
+	writeJSON(w, http.StatusOK, s.progress.StatusSince(since))
+}
+
+// planFor summarises what a run will look at, grouped by source.
+func planFor(opts runner.Options) []PlanItem {
+	counts := map[string]int{}
+	for _, sd := range opts.Seeds {
+		src := strings.ToLower(sd.ATSService)
+		if src == "" {
+			src = "generic"
+		}
+		counts[src]++
+	}
+	var plan []PlanItem
+	for src, n := range counts {
+		plan = append(plan, PlanItem{Source: src, Count: n})
+	}
+	sort.Slice(plan, func(i, j int) bool { return plan[i].Count > plan[j].Count })
+	for _, f := range opts.Feeds {
+		plan = append(plan, PlanItem{Source: f, Count: 1, Feed: true})
+	}
+	return plan
 }
 
 const quickSeedCount = 25
@@ -107,6 +132,7 @@ func (s *Server) handleRunStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "a search is already running"})
 		return
 	}
+	s.progress.SetPlan(planFor(opts))
 	go s.execute(ctx, opts)
 	writeJSON(w, http.StatusAccepted, s.progress.Status())
 }
