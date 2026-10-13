@@ -28,6 +28,10 @@ type RawJob struct {
 	URL         string
 	Description string
 	PostedAt    time.Time
+	// Policy, when set, is the source's own statement of who may apply and is used as-is
+	// instead of guessing from Location/Description.
+	Policy       *signals.RemotePolicyResult
+	Compensation string
 }
 
 // BuildMeta filters raw postings down to relevant backend roles and assembles CompanyMeta.
@@ -58,7 +62,15 @@ func BuildMeta(name, domain, careersURL, idPrefix string, jobs []RawJob) *Compan
 		if posted.IsZero() {
 			posted = time.Now().UTC()
 		}
-		policy := signals.ClassifyRemotePolicy(j.Location+" "+j.Workplace, combined, j.URL)
+		var policy signals.RemotePolicyResult
+		if j.Policy != nil {
+			policy = *j.Policy
+			if policy.DirectApplyURL == "" {
+				policy.DirectApplyURL = signals.GenerateDirectApplyURL(j.URL)
+			}
+		} else {
+			policy = signals.ClassifyRemotePolicy(j.Location+" "+j.Workplace, combined, j.URL)
+		}
 		meta.OpenRoles = append(meta.OpenRoles, JobPosting{
 			ID:                 fmt.Sprintf("%s-%s", idPrefix, j.ID),
 			Title:              j.Title,
@@ -73,6 +85,7 @@ func BuildMeta(name, domain, careersURL, idPrefix string, jobs []RawJob) *Compan
 			RemotePolicy:       policy.Badge,
 			GlobalRemote:       policy.IsGlobalRemote,
 			ContractorFriendly: policy.IsContractorFriendly,
+			Compensation:       j.Compensation,
 		})
 	}
 	for kw := range signalSet {

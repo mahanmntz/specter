@@ -217,7 +217,8 @@
     (job.keywords || []).slice(0, 6).forEach((k) => tags.push(el('span', { class: 'tag' + (hits.has(lc(k)) ? ' hit' : ''), text: k })));
 
     const when = ago(job.first_seen);
-    const meta = [job.company, job.location, when].filter(Boolean).join(' · ');
+    const src = sourceOf(job);
+    const meta = [job.company, job.location, when, src && 'via ' + src].filter(Boolean).join(' · ');
     const link = safeUrl(job.apply_url);
     const stop = (e) => e.stopPropagation();
 
@@ -237,6 +238,8 @@
     article.addEventListener('click', () => { state.sel = state.jobs.indexOf(job); markSel(); openDrawer(job); });
     return article;
   }
+  const SOURCES = { remoteok: 'RemoteOK', hn: 'Hacker News', remotive: 'Remotive', jobicy: 'Jobicy', himalayas: 'Himalayas', arbeitnow: 'Arbeitnow' };
+  const sourceOf = (job) => SOURCES[String(job.id).split('-')[0]] || '';
   const shortLevel = (s) => s.replace('Staff/Principal', 'Staff+').replace('Lead/Engineering Manager', 'Lead');
 
   async function setStatus(job, status) {

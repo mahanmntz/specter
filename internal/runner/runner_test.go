@@ -147,3 +147,41 @@ func TestSelectSeedsOrdersByPriorityAndLimits(t *testing.T) {
 		t.Error("input must not be reordered")
 	}
 }
+
+type fakeSettings struct {
+	store
+	kv map[string]string
+}
+
+func (s *fakeSettings) GetSetting(_ context.Context, k string) (string, bool, error) {
+	v, ok := s.kv[k]
+	return v, ok, nil
+}
+func (s *fakeSettings) SetSetting(_ context.Context, k, v string) error { s.kv[k] = v; return nil }
+
+type limitedFeed struct{ name string }
+
+func (f limitedFeed) Name() string                                      { return f.name }
+func (f limitedFeed) Fetch(context.Context) ([]*ats.CompanyMeta, error) { return nil, nil }
+func (f limitedFeed) MinInterval() time.Duration                        { return 6 * time.Hour }
+
+func TestRateLimitedFeedIsSkippedWhenFetchedRecently(t *testing.T) {
+	ss := &fakeSettings{kv: map[string]string{}}
+	f := limitedFeed{"remotive"}
+
+	if skip, _ := tooSoon(context.Background(), ss, f); skip {
+		t.Fatal("a feed that never ran must not be skipped")
+	}
+	markFetched(context.Background(), ss, f)
+	if skip, why := tooSoon(context.Background(), ss, f); !skip || why == "" {
+		t.Errorf("a feed fetched just now must be skipped (why=%q)", why)
+	}
+	ss.kv["feed_last_remotive"] = time.Now().Add(-7 * time.Hour).UTC().Format(time.RFC3339)
+	if skip, _ := tooSoon(context.Background(), ss, f); skip {
+		t.Error("after the interval the feed may run again")
+	}
+	// A plain store without settings never blocks.
+	if skip, _ := tooSoon(context.Background(), store{}, f); skip {
+		t.Error("no settings store → never skip")
+	}
+}

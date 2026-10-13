@@ -703,47 +703,29 @@ func runFeeds(args []string) {
 	}
 	defer store.Close()
 
-	fetcher := crawler.NewFetcher(crawler.FetcherConfig{
-		Timeout:      time.Duration(*timeoutSec) * time.Second,
-		MaxBodyBytes: 20 * 1024 * 1024,
-	})
-	available := feeds.All(fetcher)
-
-	failed := false
+	var names []string
 	for _, name := range strings.Split(*source, ",") {
-		name = strings.TrimSpace(strings.ToLower(name))
-		if name == "" {
-			continue
+		if name = strings.TrimSpace(strings.ToLower(name)); name != "" {
+			names = append(names, name)
 		}
-		feed, ok := available[name]
-		if !ok {
-			fmt.Fprintf(os.Stderr, "Unknown feed %q (available: %s)\n", name, strings.Join(feeds.Names(), ", "))
-			failed = true
-			continue
-		}
-
-		metas, err := feed.Fetch(ctx)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "⚠️  %s: %v\n", name, err)
-			failed = true
-			continue
-		}
-
-		totalRoles, newRoles := 0, 0
-		for _, meta := range metas {
-			_, n, saveErr := store.SaveCompanyAndRoles(ctx, meta)
-			if saveErr != nil {
-				fmt.Fprintf(os.Stderr, "⚠️  %s: saving %s: %v\n", name, meta.Name, saveErr)
-				continue
-			}
-			totalRoles += len(meta.OpenRoles)
-			newRoles += n
-		}
-		fmt.Printf("✅ %s: %d companies, %d matching roles (%d new)\n", name, len(metas), totalRoles, newRoles)
 	}
-	if failed {
+	res, err := runner.Run(ctx, store, runner.Options{Feeds: names, Timeout: time.Duration(*timeoutSec) * time.Second}, cliObserver{})
+	if err != nil && ctx.Err() == nil {
+		fmt.Fprintf(os.Stderr, "feeds: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Printf("Done: %d new role(s) from feeds\n", res.FeedRoles)
+}
+
+// cliObserver prints runner progress to the terminal.
+type cliObserver struct{}
+
+func (cliObserver) SetCurrentTarget(string) {}
+func (cliObserver) IncCrawled()             {}
+func (cliObserver) IncLeads(int)            {}
+func (cliObserver) IncEmails(int)           {}
+func (cliObserver) Log(format string, args ...any) {
+	fmt.Printf(format+"\n", args...)
 }
 
 func runLeads(args []string) {

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mahanmntz/specter/internal/ats"
 	"github.com/mahanmntz/specter/internal/crawler"
@@ -23,14 +24,21 @@ type Feed interface {
 // All returns every built-in feed keyed by name.
 func All(f *crawler.Fetcher) map[string]Feed {
 	return map[string]Feed{
-		"remoteok": NewRemoteOK(f),
-		"hn":       NewHackerNews(f),
+		"remoteok":  NewRemoteOK(f),
+		"hn":        NewHackerNews(f),
+		"remotive":  NewRemotive(f),
+		"jobicy":    NewJobicy(f),
+		"himalayas": NewHimalayas(f),
+		"arbeitnow": NewArbeitnow(f),
 	}
 }
 
+// MinIntervaler is implemented by feeds whose provider limits how often they may be fetched.
+type MinIntervaler interface{ MinInterval() time.Duration }
+
 // Names returns the sorted names of the built-in feeds.
 func Names() []string {
-	names := make([]string, 0, 2)
+	names := make([]string, 0, 6)
 	for n := range All(nil) {
 		names = append(names, n)
 	}
@@ -51,7 +59,8 @@ func slug(s string) string {
 
 // aggregatorHosts are never a company's own domain.
 var aggregatorHosts = map[string]bool{
-	"remoteok.com": true, "remoteok.io": true, "news.ycombinator.com": true,
+	"remoteok.com": true, "remoteok.io": true, "news.ycombinator.com": true, "remotive.com": true,
+	"jobicy.com": true, "himalayas.app": true, "arbeitnow.com": true,
 }
 
 // companyDomain derives a stable pseudo-domain for a company. It prefers the host of

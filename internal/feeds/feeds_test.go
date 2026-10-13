@@ -92,7 +92,7 @@ func TestHackerNewsFetch(t *testing.T) {
 }
 
 func TestNames(t *testing.T) {
-	if got := strings.Join(Names(), ","); got != "hn,remoteok" {
+	if got := strings.Join(Names(), ","); got != "arbeitnow,himalayas,hn,jobicy,remoteok,remotive" {
 		t.Errorf("names = %s", got)
 	}
 }

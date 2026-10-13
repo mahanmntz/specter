@@ -306,11 +306,22 @@ Specter then searches its company catalog plus RemoteOK and Hacker News in the b
 ### Aggregator feeds
 
 ```bash
-./specter feeds                    # RemoteOK + Hacker News "Who is hiring?"
-./specter feeds --source=remoteok
+./specter feeds                      # all feeds below
+./specter feeds --source=jobicy,himalayas
 ```
 
-Feeds map postings into the same database, so `apply`, `roles`, `export` and `sync` work on them unchanged.
+| Feed | What it adds | Eligibility data |
+|---|---|---|
+| RemoteOK | remote tech jobs | location text |
+| Hacker News "Who is hiring?" | monthly thread | text in the post |
+| Himalayas | remote jobs | **country list + timezone band** |
+| Jobicy | remote dev jobs | **`jobGeo` (Anywhere / Europe / USA…)** |
+| Remotive | remote software jobs | **required location** |
+| Arbeitnow | Germany / Europe | remote flag + location |
+
+Feeds that state who may apply (Himalayas, Jobicy, Remotive) are used as-is, so a "🌍 Worldwide" tag on those means the source said so. Everything else is classified from the location text first; a posting that just says "Remote" shows "⚪ Remote · region not stated" rather than being assumed open to everyone.
+
+**Provider terms:** Remotive asks for at most four requests a day and attribution, so Specter fetches it at most once every 6 hours and links every job back to Remotive (shown as "via Remotive"). All feeds use public, key-less APIs; please keep request volumes polite.
 
 Adding a source = one file in `internal/ats/` implementing `BoardAdapter`, plus a line in `NewRegistry`. See [CONTRIBUTING.md](CONTRIBUTING.md).
 

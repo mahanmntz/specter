@@ -116,6 +116,10 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 				obs.Log("⚠️  Unknown feed %q", name)
 				continue
 			}
+			if skip, why := tooSoon(ctx, store, feed); skip {
+				obs.Log("⏭️  %s: %s", feed.Name(), why)
+				continue
+			}
 			obs.SetCurrentTarget(feed.Name())
 			metas, err := feed.Fetch(ctx)
 			if err != nil {
@@ -131,6 +135,7 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 				}
 				added += n
 			}
+			markFetched(ctx, store, feed)
 			result.FeedRoles += added
 			result.NewRoles += added
 			obs.Log("✅ %s: %d new role(s)", feed.Name(), added)
@@ -142,4 +147,40 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 // feedStore is the slice of Store that feed ingestion needs.
 type feedStore interface {
 	SaveCompanyAndRoles(ctx context.Context, meta *ats.CompanyMeta) (int64, int, error)
+}
+
+// settingsStore is the optional slice of Store used to remember when a rate-limited feed last ran.
+type settingsStore interface {
+	GetSetting(ctx context.Context, key string) (string, bool, error)
+	SetSetting(ctx context.Context, key, value string) error
+}
+
+// tooSoon reports whether a feed with a provider-imposed minimum interval was fetched too recently.
+func tooSoon(ctx context.Context, store feedStore, feed feeds.Feed) (bool, string) {
+	mi, ok := feed.(feeds.MinIntervaler)
+	ss, hasSettings := store.(settingsStore)
+	if !ok || !hasSettings {
+		return false, ""
+	}
+	raw, found, err := ss.GetSetting(ctx, "feed_last_"+feed.Name())
+	if err != nil || !found {
+		return false, ""
+	}
+	last, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return false, ""
+	}
+	if wait := mi.MinInterval() - time.Since(last); wait > 0 {
+		return true, fmt.Sprintf("fetched recently; the provider asks for at most one fetch per %s (next in %s)", mi.MinInterval().Round(time.Hour), wait.Round(time.Minute))
+	}
+	return false, ""
+}
+
+func markFetched(ctx context.Context, store feedStore, feed feeds.Feed) {
+	if _, ok := feed.(feeds.MinIntervaler); !ok {
+		return
+	}
+	if ss, ok := store.(settingsStore); ok {
+		_ = ss.SetSetting(ctx, "feed_last_"+feed.Name(), time.Now().UTC().Format(time.RFC3339))
+	}
 }

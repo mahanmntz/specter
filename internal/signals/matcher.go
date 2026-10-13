@@ -261,3 +261,22 @@ func CalculateSkillMatch(targetText string, userSkills []string) (int, []string)
 
 	return pct, matched
 }
+
+// SearchQueries returns up to n short phrases describing the active profile's roles
+// (for example "software engineer", "backend"), used to query aggregator search APIs.
+func SearchQueries(n int) []string {
+	profileMu.RLock()
+	defer profileMu.RUnlock()
+	var out []string
+	for _, t := range includeRoleTerms {
+		if len(out) == n {
+			break
+		}
+		// Skip fragments too short or generic to search for.
+		if len(t) < 4 || t == "system" || t == "systems" || t == "node" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
+}
