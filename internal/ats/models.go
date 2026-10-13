@@ -27,6 +27,7 @@ type JobPosting struct {
 	FirstSeenAt        time.Time `json:"first_seen_at"`
 	LastSeenAt         time.Time `json:"last_seen_at"`
 	IsNew              bool      `json:"is_new"`
+	Closed             bool      `json:"closed,omitempty"` // the posting has been taken down
 	PersonalScore      int       `json:"personal_score,omitempty"`
 	PersonalMatches    []string  `json:"personal_matches,omitempty"`
 }

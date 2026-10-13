@@ -28,8 +28,8 @@ var staticFS embed.FS
 // Source is the data the UI needs; *storage.Store satisfies it.
 type Source interface {
 	ListDirectApplyRoles(ctx context.Context, f storage.DirectApplyFilter) ([]ats.JobPosting, error)
-	ListRoleStatuses(ctx context.Context) (map[string]string, error)
-	SetRoleStatus(ctx context.Context, externalID, status string) error
+	ListRoleTracking(ctx context.Context) (map[string]storage.Tracking, error)
+	UpdateTracking(ctx context.Context, externalID string, u storage.TrackingUpdate) error
 	GetLastCrawlRun(ctx context.Context) (*storage.CrawlRun, error)
 	RecordCrawlRun(ctx context.Context, run *storage.CrawlRun) error
 	GetSetting(ctx context.Context, key string) (string, bool, error)
@@ -89,6 +89,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 	mux.HandleFunc("GET /api/jobs", s.handleJobs)
 	mux.HandleFunc("GET /api/facets", s.handleFacets)
+	mux.HandleFunc("GET /api/pipeline", s.handlePipeline)
 	mux.HandleFunc("POST /api/status", s.handleStatus)
 	mux.HandleFunc("GET /api/profile", s.handleGetProfile)
 	mux.HandleFunc("PUT /api/profile", s.handlePutProfile)
@@ -141,6 +142,10 @@ type Job struct {
 	Score      int       `json:"score"`
 	Matches    []string  `json:"matches,omitempty"`
 	Status     string    `json:"status,omitempty"`
+	Note       string    `json:"note,omitempty"`
+	AppliedAt  time.Time `json:"applied_at,omitempty"`
+	FollowUpAt time.Time `json:"follow_up_at,omitempty"`
+	Closed     bool      `json:"closed,omitempty"` // the posting has been taken down
 }
 
 type query struct {
@@ -200,7 +205,7 @@ func (s *Server) load(ctx context.Context) ([]Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	statuses, err := s.src.ListRoleStatuses(ctx)
+	tracking, err := s.src.ListRoleTracking(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -211,30 +216,37 @@ func (s *Server) load(ctx context.Context) ([]Job, error) {
 	jobs := make([]Job, 0, len(roles))
 	for _, r := range roles {
 		// Once a role is chosen, only show postings that fit it (older scans may hold others).
-		if configured && !signals.IsBackendRole(r.Title, r.Department) {
+		// Anything the user is tracking always stays visible.
+		if _, tracked := tracking[r.ID]; configured && !tracked && !signals.IsBackendRole(r.Title, r.Department) {
 			continue
 		}
-		corpus := r.Title + " " + r.Department + " " + r.Location + " " + r.RemotePolicy + " " + strings.Join(r.Keywords, " ")
-		score, matches := signals.CalculateSkillMatch(corpus, skills)
-		apply := r.ApplyURL
-		if apply == "" {
-			apply = r.URL
-		}
-		jobs = append(jobs, Job{
-			ID: r.ID, Title: r.Title, Company: r.CompanyName, Domain: r.CompanyDomain,
-			Location: r.Location, Department: r.Department, Seniority: r.Seniority,
-			Keywords: r.Keywords, URL: r.URL, ApplyURL: apply, Policy: r.RemotePolicy,
-			Global: r.GlobalRemote, Contractor: r.ContractorFriendly, Comp: r.Compensation,
-			FirstSeen: r.FirstSeenAt, Score: score, Matches: matches, Status: statuses[r.ID],
-		})
+		jobs = append(jobs, toJob(r, skills, tracking[r.ID]))
 	}
 	return jobs, nil
 }
 
+// toJob converts a stored role into its UI form with the user's tracking attached.
+func toJob(r ats.JobPosting, skills []string, t storage.Tracking) Job {
+	corpus := r.Title + " " + r.Department + " " + r.Location + " " + r.RemotePolicy + " " + strings.Join(r.Keywords, " ")
+	score, matches := signals.CalculateSkillMatch(corpus, skills)
+	apply := r.ApplyURL
+	if apply == "" {
+		apply = r.URL
+	}
+	return Job{
+		ID: r.ID, Title: r.Title, Company: r.CompanyName, Domain: r.CompanyDomain,
+		Location: r.Location, Department: r.Department, Seniority: r.Seniority,
+		Keywords: r.Keywords, URL: r.URL, ApplyURL: apply, Policy: r.RemotePolicy,
+		Global: r.GlobalRemote, Contractor: r.ContractorFriendly, Comp: r.Compensation,
+		FirstSeen: r.FirstSeenAt, Score: score, Matches: matches, Closed: r.Closed,
+		Status: t.Status, Note: t.Note, AppliedAt: t.AppliedAt, FollowUpAt: t.FollowUpAt,
+	}
+}
+
 func (q query) matches(j Job, now time.Time) bool {
 	switch q.status {
-	case "", "active": // default view hides dismissed jobs
-		if j.Status == storage.StatusHidden {
+	case "", "active": // default view hides jobs the user dismissed or was turned down for
+		if j.Status == storage.StatusHidden || j.Status == storage.StatusRejected {
 			return false
 		}
 	case "all":
@@ -360,13 +372,17 @@ func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
 	sen := map[string]int{}
 	kw := map[string]int{}
 	statuses := map[string]int{}
+	due := 0
 	global, contractor, newWeek, companies := 0, 0, 0, map[string]bool{}
 	now := s.now()
 	for _, j := range all {
 		if j.Status != "" {
 			statuses[j.Status]++
 		}
-		if j.Status == storage.StatusHidden {
+		if followUpDue(j, now) {
+			due++
+		}
+		if j.Status == storage.StatusHidden || j.Status == storage.StatusRejected {
 			continue
 		}
 		sen[j.Seniority]++
@@ -389,6 +405,7 @@ func (s *Server) handleFacets(w http.ResponseWriter, r *http.Request) {
 		"global":     global,
 		"contractor": contractor,
 		"new_week":   newWeek,
+		"follow_ups": due,
 		"companies":  len(companies),
 		"seniority":  topCounts(sen, 0),
 		"keywords":   topCounts(kw, 30),
@@ -419,21 +436,42 @@ func topCounts(m map[string]int, limit int) []facetCount {
 	return out
 }
 
+// handleStatus updates what the user tracks about a role: its stage, a note, and a follow-up date.
+// Every field is optional; omitted fields are left unchanged.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID     string `json:"id"`
-		Status string `json:"status"`
+		ID       string  `json:"id"`
+		Status   *string `json:"status"`
+		Note     *string `json:"note"`
+		FollowUp *string `json:"follow_up"` // "YYYY-MM-DD", or "" to clear
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON"})
 		return
 	}
-	if body.ID == "" || (body.Status != "" && !storage.ValidRoleStatus(body.Status)) {
+	if body.ID == "" || (body.Status != nil && *body.Status != "" && !storage.ValidRoleStatus(*body.Status)) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id or status"})
 		return
 	}
-	if err := s.src.SetRoleStatus(r.Context(), body.ID, body.Status); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if body.Note != nil && len(*body.Note) > 4000 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "note is too long (4000 characters max)"})
+		return
+	}
+	u := storage.TrackingUpdate{Status: body.Status, Note: body.Note}
+	if body.FollowUp != nil {
+		var t time.Time
+		if *body.FollowUp != "" {
+			parsed, err := time.Parse("2006-01-02", *body.FollowUp)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "follow_up must be YYYY-MM-DD"})
+				return
+			}
+			t = parsed.UTC()
+		}
+		u.FollowUp = &t
+	}
+	if err := s.src.UpdateTracking(r.Context(), body.ID, u); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})

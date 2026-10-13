@@ -146,7 +146,10 @@ func NewStore(dbPath string) (*Store, error) {
 	CREATE TABLE IF NOT EXISTS role_status (
 		external_id TEXT PRIMARY KEY,
 		status TEXT NOT NULL,
-		updated_at DATETIME NOT NULL
+		updated_at DATETIME NOT NULL,
+		note TEXT NOT NULL DEFAULT '',
+		applied_at DATETIME,
+		follow_up_at DATETIME
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_roles_company ON roles(company_id);
@@ -201,6 +204,11 @@ func NewStore(dbPath string) (*Store, error) {
 	for _, col := range roleCols {
 		_, _ = db.Exec("ALTER TABLE roles ADD COLUMN " + col)
 	}
+
+	// Application-tracking columns for databases created before the pipeline existed
+	_, _ = db.Exec("ALTER TABLE role_status ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+	_, _ = db.Exec("ALTER TABLE role_status ADD COLUMN applied_at DATETIME")
+	_, _ = db.Exec("ALTER TABLE role_status ADD COLUMN follow_up_at DATETIME")
 
 	// Purge any historical bot / CI accounts in persistent store
 	_, _ = db.Exec(`DELETE FROM engineering_leads WHERE
@@ -836,11 +844,15 @@ func (s *Store) ListRoles(ctx context.Context, keyword string) ([]ats.JobPosting
 
 // DirectApplyFilter options for filtering remote and contractor-friendly roles.
 type DirectApplyFilter struct {
-	CompanyDomain  string
-	GlobalOnly     bool
-	ContractorOnly bool
-	FreshOnly      bool
-	Since          time.Time
+	// ExternalIDs restricts the result to these roles.
+	ExternalIDs []string
+	// IncludeInactive also returns postings that have since been taken down.
+	IncludeInactive bool
+	CompanyDomain   string
+	GlobalOnly      bool
+	ContractorOnly  bool
+	FreshOnly       bool
+	Since           time.Time
 }
 
 // ListDirectApplyRoles queries roles optimized for direct application and global reachability.
@@ -852,12 +864,21 @@ func (s *Store) ListDirectApplyRoles(ctx context.Context, filter DirectApplyFilt
 		       COALESCE(r.workplace_type, ''), COALESCE(r.remote_policy, ''),
 		       COALESCE(r.global_remote, 0), COALESCE(r.contractor_friendly, 0),
 		       COALESCE(r.compensation, ''), COALESCE(r.first_seen_at, r.discovered_at),
-		       COALESCE(r.last_seen_at, r.discovered_at)
+		       COALESCE(r.last_seen_at, r.discovered_at), COALESCE(r.is_active, 1)
 		FROM roles r
 		JOIN companies c ON r.company_id = c.id
-		WHERE r.is_active = 1
+		WHERE 1 = 1
 	`
 	var args []any
+	if !filter.IncludeInactive {
+		query += ` AND r.is_active = 1`
+	}
+	if len(filter.ExternalIDs) > 0 {
+		query += ` AND r.external_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(filter.ExternalIDs)), ",") + `)`
+		for _, id := range filter.ExternalIDs {
+			args = append(args, id)
+		}
+	}
 	if filter.CompanyDomain != "" {
 		query += ` AND (c.domain = ? OR c.domain LIKE ?)`
 		args = append(args, filter.CompanyDomain, "%"+filter.CompanyDomain+"%")
@@ -885,17 +906,18 @@ func (s *Store) ListDirectApplyRoles(ctx context.Context, filter DirectApplyFilt
 		var r ats.JobPosting
 		var internalID int64
 		var kwCSV string
-		var globalRem, contractorFr bool
+		var globalRem, contractorFr, active bool
 		var postedAtRaw, firstSeenRaw, lastSeenRaw any
 		if err := rows.Scan(
 			&r.CompanyDomain, &r.CompanyName,
 			&internalID, &r.ID, &r.Title, &r.URL, &r.ApplyURL,
 			&r.Location, &r.Department, &r.Seniority, &kwCSV, &postedAtRaw,
 			&r.WorkplaceType, &r.RemotePolicy, &globalRem, &contractorFr,
-			&r.Compensation, &firstSeenRaw, &lastSeenRaw,
+			&r.Compensation, &firstSeenRaw, &lastSeenRaw, &active,
 		); err != nil {
 			return nil, err
 		}
+		r.Closed = !active
 		r.PostedAt = parseSQLiteTime(postedAtRaw)
 		r.GlobalRemote = globalRem
 		r.ContractorFriendly = contractorFr

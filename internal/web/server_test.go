@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,26 +16,62 @@ import (
 
 type fakeSource struct {
 	roles    []ats.JobPosting
-	statuses map[string]string
+	tracking map[string]storage.Tracking
+	closed   []ats.JobPosting // postings taken down since they were tracked
 	settings map[string]string
 	runs     []*storage.CrawlRun
 }
 
-func (f *fakeSource) ListDirectApplyRoles(context.Context, storage.DirectApplyFilter) ([]ats.JobPosting, error) {
-	return f.roles, nil
+func (f *fakeSource) ListDirectApplyRoles(_ context.Context, flt storage.DirectApplyFilter) ([]ats.JobPosting, error) {
+	if len(flt.ExternalIDs) == 0 {
+		return f.roles, nil
+	}
+	want := map[string]bool{}
+	for _, id := range flt.ExternalIDs {
+		want[id] = true
+	}
+	var out []ats.JobPosting
+	for _, r := range append(append([]ats.JobPosting{}, f.roles...), f.closed...) {
+		if want[r.ID] && (flt.IncludeInactive || !r.Closed) {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
-func (f *fakeSource) ListRoleStatuses(context.Context) (map[string]string, error) {
-	out := map[string]string{}
-	for k, v := range f.statuses {
+func (f *fakeSource) ListRoleTracking(context.Context) (map[string]storage.Tracking, error) {
+	out := map[string]storage.Tracking{}
+	for k, v := range f.tracking {
 		out[k] = v
 	}
 	return out, nil
 }
-func (f *fakeSource) SetRoleStatus(_ context.Context, id, st string) error {
-	if st == "" {
-		delete(f.statuses, id)
+
+// UpdateTracking mimics the real store closely enough for handler tests.
+func (f *fakeSource) UpdateTracking(_ context.Context, id string, u storage.TrackingUpdate) error {
+	t := f.tracking[id]
+	if u.Status != nil {
+		if *u.Status != "" && !storage.ValidRoleStatus(*u.Status) {
+			return fmt.Errorf("invalid status %q", *u.Status)
+		}
+		t.Status = *u.Status
+		if t.Status == storage.StatusApplied && t.AppliedAt.IsZero() {
+			t.AppliedAt = now
+			t.FollowUpAt = now.Add(storage.DefaultFollowUp)
+		}
+	}
+	if u.Note != nil {
+		t.Note = *u.Note
+	}
+	if u.FollowUp != nil {
+		t.FollowUpAt = *u.FollowUp
+	}
+	if t.Status == "" && t.Note == "" {
+		delete(f.tracking, id)
 	} else {
-		f.statuses[id] = st
+		if t.Status == "" {
+			t.Status = storage.StatusSaved
+		}
+		f.tracking[id] = t
 	}
 	return nil
 }
@@ -58,7 +95,7 @@ var now = time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
 
 func newFake() *fakeSource {
 	day := func(n int) time.Time { return now.Add(-time.Duration(n) * 24 * time.Hour) }
-	return &fakeSource{statuses: map[string]string{}, settings: map[string]string{}, roles: []ats.JobPosting{
+	return &fakeSource{tracking: map[string]storage.Tracking{}, settings: map[string]string{}, roles: []ats.JobPosting{
 		{ID: "1", Title: "Senior Backend Engineer", CompanyName: "Acme", CompanyDomain: "acme.com", Location: "Remote - Worldwide",
 			Seniority: "Senior", Keywords: []string{"go", "redis"}, GlobalRemote: true, ContractorFriendly: true, FirstSeenAt: day(1), ApplyURL: "https://acme.com/apply/1"},
 		{ID: "2", Title: "Staff Platform Engineer", CompanyName: "Initech", CompanyDomain: "initech.com", Location: "Berlin",

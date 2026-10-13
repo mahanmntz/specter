@@ -420,3 +420,94 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Errorf("v=%q ok=%v", v, ok)
 	}
 }
+
+func TestTrackingPipelineBehaviour(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	str := func(s string) *string { return &s }
+
+	// Applying stamps the date and suggests a follow-up a week later.
+	if err := store.UpdateTracking(ctx, "r1", TrackingUpdate{Status: str(StatusApplied)}); err != nil {
+		t.Fatal(err)
+	}
+	tr, _ := store.ListRoleTracking(ctx)
+	r1 := tr["r1"]
+	if r1.Status != StatusApplied || r1.AppliedAt.IsZero() {
+		t.Fatalf("applied = %+v", r1)
+	}
+	if d := r1.FollowUpAt.Sub(r1.AppliedAt); d < 6*24*time.Hour || d > 8*24*time.Hour {
+		t.Errorf("default follow-up should be about a week out, got %v", d)
+	}
+
+	// Re-applying does not reset the original dates; a note and a custom reminder persist.
+	custom := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	if err := store.UpdateTracking(ctx, "r1", TrackingUpdate{Note: str("Recruiter: Sam, sam@acme.com"), FollowUp: &custom}); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.UpdateTracking(ctx, "r1", TrackingUpdate{Status: str(StatusApplied)})
+	tr, _ = store.ListRoleTracking(ctx)
+	r1b := tr["r1"]
+	if !r1b.AppliedAt.Equal(r1.AppliedAt) || r1b.Note != "Recruiter: Sam, sam@acme.com" || !r1b.FollowUpAt.Equal(custom) {
+		t.Errorf("tracking drifted: %+v (custom=%v)", r1b, custom)
+	}
+
+	// Finished stages drop the reminder but keep the history.
+	_ = store.UpdateTracking(ctx, "r1", TrackingUpdate{Status: str(StatusInterview)})
+	_ = store.UpdateTracking(ctx, "r1", TrackingUpdate{Status: str(StatusOffer)})
+	tr, _ = store.ListRoleTracking(ctx)
+	if tr["r1"].Status != StatusOffer || !tr["r1"].FollowUpAt.IsZero() || tr["r1"].AppliedAt.IsZero() {
+		t.Errorf("offer = %+v", tr["r1"])
+	}
+
+	// Clearing the status keeps a note (as "saved") but removes an empty row entirely.
+	_ = store.UpdateTracking(ctx, "r1", TrackingUpdate{Status: str("")})
+	tr, _ = store.ListRoleTracking(ctx)
+	if tr["r1"].Status != StatusSaved || tr["r1"].Note == "" {
+		t.Errorf("a note must not be orphaned: %+v", tr["r1"])
+	}
+	_ = store.UpdateTracking(ctx, "r1", TrackingUpdate{Note: str("")})
+	_ = store.UpdateTracking(ctx, "r1", TrackingUpdate{Status: str("")})
+	tr, _ = store.ListRoleTracking(ctx)
+	if _, ok := tr["r1"]; ok {
+		t.Error("an empty row should be deleted")
+	}
+
+	// Validation.
+	if store.UpdateTracking(ctx, "x", TrackingUpdate{Status: str("bogus")}) == nil ||
+		store.UpdateTracking(ctx, "", TrackingUpdate{}) == nil ||
+		store.UpdateTracking(ctx, "x", TrackingUpdate{Note: str(string(make([]byte, 5000)))}) == nil {
+		t.Error("invalid updates must be rejected")
+	}
+}
+
+func TestDirectApplyFilterByIDAndInactive(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "d.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	meta := &ats.CompanyMeta{Name: "Acme", Domain: "acme.com", OpenRoles: []ats.JobPosting{
+		{ID: "gh-1", Title: "Backend Engineer", URL: "https://acme.com/1", Keywords: []string{"go"}},
+		{ID: "gh-2", Title: "Platform Engineer", URL: "https://acme.com/2", Keywords: []string{"go"}},
+	}}
+	if _, _, err := store.SaveCompanyAndRoles(ctx, meta); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DB().Exec(`UPDATE roles SET is_active = 0 WHERE external_id = 'gh-2'`); err != nil {
+		t.Fatal(err)
+	}
+
+	active, _ := store.ListDirectApplyRoles(ctx, DirectApplyFilter{})
+	if len(active) != 1 || active[0].ID != "gh-1" || active[0].Closed {
+		t.Errorf("active = %+v", active)
+	}
+	all, _ := store.ListDirectApplyRoles(ctx, DirectApplyFilter{IncludeInactive: true, ExternalIDs: []string{"gh-2"}})
+	if len(all) != 1 || all[0].ID != "gh-2" || !all[0].Closed {
+		t.Errorf("a taken-down tracked role must still be retrievable and flagged closed: %+v", all)
+	}
+}
