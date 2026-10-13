@@ -24,6 +24,16 @@ var languageSkills = map[string][]string{
 	"Smarty":           {"Helm"},
 	"Solidity":         {"Solidity", "Smart Contracts"},
 	"ShaderLab":        {"Unity"},
+	"Less":             {"CSS"},
+	"Sass":             {"CSS"},
+	"Bash":             {"Shell"},
+	"PowerShell":       {"Shell"},
+	"Objective-C++":    {"iOS"},
+	"Cuda":             {"C++"},
+	"Verilog":          {"FPGA"},
+	"VHDL":             {"FPGA"},
+	"Assembly":         {"Assembly"},
+	"Jsonnet":          {"Kubernetes"},
 }
 
 // genericSkills show up in almost every repository, so they only count when clearly emphasised.
@@ -119,7 +129,7 @@ type skillAcc struct {
 }
 
 // weighSkills turns repositories plus self-description into per-skill evidence.
-func weighSkills(repos []ghRepo, pt profileText, now time.Time) (acc map[string]*skillAcc, analyzed int) {
+func weighSkills(repos []ghRepo, langBytes map[string]map[string]int, pt profileText, now time.Time) (acc map[string]*skillAcc, analyzed int) {
 	acc = map[string]*skillAcc{}
 	originals := 0
 	for _, r := range repos {
@@ -141,7 +151,26 @@ func weighSkills(repos []ghRepo, pt profileText, now time.Time) (acc map[string]
 				hit[skill] = v
 			}
 		}
-		if r.Language != "" {
+		if bytes := langBytes[r.Name]; len(bytes) > 0 {
+			// Real byte counts: each language counts in proportion to its share of the code.
+			total := 0
+			for _, b := range bytes {
+				total += b
+			}
+			for lang, b := range bytes {
+				share := float64(b) / float64(total)
+				if share < 0.05 {
+					continue
+				}
+				factor := math.Min(1, math.Max(0.25, share/0.5))
+				if canon, ok := signals.CanonicalSkill(lang); ok {
+					add(canon, factor)
+				}
+				for _, s := range languageSkills[lang] {
+					add(s, factor)
+				}
+			}
+		} else if r.Language != "" {
 			if canon, ok := signals.CanonicalSkill(r.Language); ok {
 				add(canon, 1)
 			}
@@ -320,9 +349,9 @@ func rankRoles(acc map[string]*skillAcc, pt profileText) (best string, order []s
 }
 
 // analyze fills res.Skills, res.Role, res.Roles and res.RoleScores.
-func analyze(res *Result, repos []ghRepo, bio, readme string, now time.Time) {
+func analyze(res *Result, repos []ghRepo, langBytes map[string]map[string]int, bio, readme string, now time.Time) {
 	pt := readProfileText(bio, readme)
-	acc, analyzed := weighSkills(repos, pt, now)
+	acc, analyzed := weighSkills(repos, langBytes, pt, now)
 	res.ReposAnalyzed = analyzed
 	res.Skills = selectSkills(acc)
 	res.Role, res.Roles, res.RoleScores = rankRoles(acc, pt)

@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -181,8 +182,49 @@ func (c *Client) Analyze(ctx context.Context, login string) (*Result, error) {
 	readme, _ := c.getRaw(ctx, "/repos/"+url.PathEscape(login)+"/"+url.PathEscape(login)+"/readme")
 	res.ReadmeUsed = strings.TrimSpace(readme) != ""
 
-	analyze(res, repos, user.Bio, readme, time.Now())
+	now := time.Now()
+	langs := c.fetchLanguages(ctx, login, repos, now)
+	analyze(res, repos, langs, user.Bio, readme, now)
 	return res, nil
+}
+
+// maxLanguageLookups bounds the extra API calls: unauthenticated GitHub allows 60 requests an hour.
+const maxLanguageLookups = 8
+
+// fetchLanguages reads the per-language byte counts of the user's strongest original repositories,
+// which says far more than the single "primary language" label. It is best effort: any error
+// (including rate limiting) just means those repositories fall back to their primary language.
+func (c *Client) fetchLanguages(ctx context.Context, login string, repos []ghRepo, now time.Time) map[string]map[string]int {
+	type scored struct {
+		name string
+		w    float64
+	}
+	var cand []scored
+	for _, r := range repos {
+		if !r.Fork {
+			cand = append(cand, scored{r.Name, repoWeight(r, now)})
+		}
+	}
+	sort.Slice(cand, func(i, j int) bool { return cand[i].w > cand[j].w })
+	if len(cand) > maxLanguageLookups {
+		cand = cand[:maxLanguageLookups]
+	}
+
+	out := map[string]map[string]int{}
+	for _, r := range cand {
+		if ctx.Err() != nil {
+			break
+		}
+		var langs map[string]int
+		err := c.get(ctx, "/repos/"+url.PathEscape(login)+"/"+url.PathEscape(r.name)+"/languages", &langs)
+		if errors.Is(err, ErrRateLimited) {
+			break // out of budget: keep what we have
+		}
+		if err == nil && len(langs) > 0 {
+			out[r.name] = langs
+		}
+	}
+	return out
 }
 
 // getRaw fetches a raw text document (e.g. a README); a missing document is not an error.

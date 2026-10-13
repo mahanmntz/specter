@@ -83,7 +83,7 @@ func TestSelectionKeepsDepthAndRecencyNotEverythingEverTouched(t *testing.T) {
 	repos = append(repos, repeat(3, func(i int) ghRepo { return repo("tool", "Python", 14+i, 10) })...)
 	// One-off experiments and old coursework.
 	repos = append(repos, repo("try-swift", "Swift", 2, 0), repo("flutter-demo", "Dart", 40, 1), repo("site", "HTML", 50, 1), repo("sh", "Shell", 3, 0))
-	acc, analyzed := weighSkills(repos, profileText{hints: map[string]float64{}}, now)
+	acc, analyzed := weighSkills(repos, nil, profileText{hints: map[string]float64{}}, now)
 	if analyzed != len(repos) {
 		t.Fatalf("analyzed=%d", analyzed)
 	}
@@ -114,7 +114,7 @@ func TestPreselectionIsCappedAndGenericSkillsNeedEmphasis(t *testing.T) {
 		repos = append(repos, repeat(3, func(i int) ghRepo { return repo("p", l, 1+i, 12) })...)
 	}
 	repos = append(repos, repeat(2, func(i int) ghRepo { return repo("page", "HTML", 1, 12) })...)
-	acc, _ := weighSkills(repos, profileText{hints: map[string]float64{}}, now)
+	acc, _ := weighSkills(repos, nil, profileText{hints: map[string]float64{}}, now)
 	sel := 0
 	for _, s := range selectSkills(acc) {
 		if s.Selected {
@@ -130,7 +130,7 @@ func TestPreselectionIsCappedAndGenericSkillsNeedEmphasis(t *testing.T) {
 }
 
 func TestSparseProfileStillGetsStartingPoint(t *testing.T) {
-	acc, _ := weighSkills([]ghRepo{repo("a", "Go", 1, 1)}, profileText{hints: map[string]float64{}}, now)
+	acc, _ := weighSkills([]ghRepo{repo("a", "Go", 1, 1)}, nil, profileText{hints: map[string]float64{}}, now)
 	var picked int
 	for _, s := range selectSkills(acc) {
 		if s.Selected {
@@ -213,7 +213,7 @@ func TestRoleRanking(t *testing.T) {
 	}
 }
 
-func fakeGitHub(t *testing.T, user, repos, readme string, status int) *Client {
+func fakeGitHub(t *testing.T, user, repos, readme string, status int, extra ...map[string]string) *Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if status != 200 {
@@ -238,6 +238,12 @@ func fakeGitHub(t *testing.T, user, repos, readme string, status int) *Client {
 			}
 			_, _ = w.Write([]byte(readme))
 		default:
+			for _, m := range extra {
+				if body, ok := m[r.URL.Path]; ok {
+					_, _ = w.Write([]byte(body))
+					return
+				}
+			}
 			http.NotFound(w, r)
 		}
 	}))
@@ -350,5 +356,62 @@ func TestAnalyzeRetriesOnceThenReportsUnreachable(t *testing.T) {
 	}
 	if calls.Load() != 2 {
 		t.Errorf("expected exactly one retry, got %d calls", calls.Load())
+	}
+}
+
+func TestLanguageBytesBeatPrimaryLanguageLabel(t *testing.T) {
+	// GitHub labels this repo "TypeScript", but most of the code is Go (and a little shell).
+	r := repo("platform", "TypeScript", 1, 24)
+	bytes := map[string]map[string]int{"platform": {"Go": 80000, "TypeScript": 15000, "Shell": 1000}}
+	acc, _ := weighSkills([]ghRepo{r}, bytes, profileText{hints: map[string]float64{}}, now)
+	if acc["Go"] == nil || acc["TypeScript"] == nil {
+		t.Fatalf("both real languages expected: %v", acc)
+	}
+	if acc["Go"].weight <= acc["TypeScript"].weight*2 {
+		t.Errorf("Go (84%% of bytes) must clearly outweigh TypeScript: %.2f vs %.2f", acc["Go"].weight, acc["TypeScript"].weight)
+	}
+	if acc["Shell"] != nil {
+		t.Error("a 1% language is noise and must be ignored")
+	}
+
+	// Without byte counts the primary language is all we know.
+	acc, _ = weighSkills([]ghRepo{r}, nil, profileText{hints: map[string]float64{}}, now)
+	if acc["Go"] != nil || acc["TypeScript"] == nil {
+		t.Errorf("fallback should use the primary language: %v", acc)
+	}
+}
+
+func TestAnalyzeFetchesLanguagesForStrongestReposAndSurvivesRateLimit(t *testing.T) {
+	recent := now.AddDate(0, -1, 0).Format(time.RFC3339)
+	created := now.AddDate(-2, 0, 0).Format(time.RFC3339)
+	repos := `[{"name":"platform","language":"TypeScript","size":900,"pushed_at":"` + recent + `","created_at":"` + created + `"}]`
+	c := fakeGitHub(t, `{"login":"octocat"}`, repos, "", 200,
+		map[string]string{"/repos/octocat/platform/languages": `{"Go":90000,"TypeScript":9000}`})
+	res, err := c.Analyze(context.Background(), "octocat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := skillMap(res.Skills)
+	if got["Go"].Score <= got["TypeScript"].Score {
+		t.Errorf("real language bytes should be used: Go %.1f TS %.1f", got["Go"].Score, got["TypeScript"].Score)
+	}
+
+	// When the languages endpoint is rate limited the analysis still succeeds from primary languages.
+	limited := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/users/octocat":
+			_, _ = w.Write([]byte(`{"login":"octocat"}`))
+		case "/users/octocat/repos":
+			_, _ = w.Write([]byte(repos))
+		case "/repos/octocat/octocat/readme":
+			http.NotFound(w, r)
+		default:
+			w.WriteHeader(http.StatusForbidden)
+		}
+	}))
+	defer limited.Close()
+	res, err = (&Client{HTTP: limited.Client(), BaseURL: limited.URL}).Analyze(context.Background(), "octocat")
+	if err != nil || skillMap(res.Skills)["TypeScript"].Name == "" {
+		t.Errorf("rate-limited languages must degrade gracefully: err=%v skills=%v", err, res.Skills)
 	}
 }
