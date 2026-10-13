@@ -124,6 +124,15 @@ func (s *Scanner) ProcessSeed(ctx context.Context, seed seeds.SeedTarget) (Resul
 	started := time.Now()
 	s.emit(Event{Kind: "company", Name: seed.Name, Source: seed.ATSService, Status: StatusRunning})
 	meta, err := s.Ingester.ExtractBySeed(ctx, seed)
+	if err != nil && isTransient(err) && ctx.Err() == nil {
+		// One retry for connection-level hiccups (TLS handshake timeouts, resets): they are common
+		// when many boards are fetched at once, and a second try almost always works.
+		select {
+		case <-time.After(1500 * time.Millisecond):
+			meta, err = s.Ingester.ExtractBySeed(ctx, seed)
+		case <-ctx.Done():
+		}
+	}
 	if mErr := s.Frontier.MarkVisited(apiURL, "ats_"+seed.ATSService, err); mErr != nil {
 		s.Observer.Log("⚠️  Frontier update failed for %s: %v", seed.Name, mErr)
 	}
@@ -245,4 +254,15 @@ func SeedAPIURL(seed seeds.SeedTarget) string {
 	default:
 		return "https://" + seed.Domain
 	}
+}
+
+// isTransient reports whether err looks like a temporary network problem rather than a bad board.
+func isTransient(err error) bool {
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{"tls handshake timeout", "connection reset", "eof", "timeout", "temporarily", "connection refused", "no such host", "unexpected end of json"} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
 }

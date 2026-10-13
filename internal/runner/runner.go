@@ -56,7 +56,7 @@ func Run(ctx context.Context, store *storage.Store, opts Options, obs scanner.Ob
 		opts.Concurrency = 4
 	}
 	if opts.Timeout <= 0 {
-		opts.Timeout = 15 * time.Second
+		opts.Timeout = 25 * time.Second
 	}
 
 	frontier, err := crawler.NewFrontier(store.DB())
@@ -77,7 +77,9 @@ func Run(ctx context.Context, store *storage.Store, opts Options, obs scanner.Ob
 		Observer: obs,
 		TTL:      0, // an explicit run always refreshes
 	}
-	return runWith(ctx, sc, fetcher, store, opts, obs)
+	// Aggregator feeds return large documents from slow servers, so they get a longer timeout.
+	feedFetcher := crawler.NewFetcher(crawler.FetcherConfig{Timeout: 60 * time.Second, MaxBodyBytes: 20 * 1024 * 1024})
+	return runWith(ctx, sc, feedFetcher, store, opts, obs)
 }
 
 // runWith is Run's testable core.

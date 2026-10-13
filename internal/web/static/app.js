@@ -486,6 +486,156 @@
     chip.title = 'Edit your profile (' + (preset ? preset.label : pr.prefs.role) + ')';
   }
 
+
+  // ---------- mission control (live search overlay) ----------
+  const SOURCE_NAMES = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', workable: 'Workable', smartrecruiters: 'SmartRecruiters', recruitee: 'Recruitee', generic: 'Company site', remoteok: 'RemoteOK', hn: 'Hacker News', remotive: 'Remotive', jobicy: 'Jobicy', himalayas: 'Himalayas', arbeitnow: 'Arbeitnow', feed: 'Feed' };
+  const srcName = (k) => SOURCE_NAMES[k] || k;
+  const M = { open: false, seq: 0, events: [], filter: 'all', started: 0, timer: null, shown: new Set(), nums: {} };
+  let mEl = null;
+
+  function countUp(node, to) {
+    const from = parseInt(node.textContent, 10) || 0;
+    if (from === to) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) { node.textContent = to; return; }
+    const t0 = performance.now(), dur = 450;
+    const step = (t) => { const k = Math.min(1, (t - t0) / dur); node.textContent = Math.round(from + (to - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+
+  function buildMission() {
+    if (mEl) return;
+    const tile = (id, label, cls) => el('div', { class: 'm-tile ' + (cls || '') }, el('b', { id: 'm-' + id, text: '0' }), el('span', { text: label }));
+    mEl = el('div', { id: 'mission', class: 'mission', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Search in progress' },
+      el('div', { class: 'm-card' },
+        el('div', { class: 'm-head' },
+          el('div', { class: 'radar', 'aria-hidden': 'true' }, el('i'), el('i'), el('i'), el('span', { class: 'sweep' }), el('span', { class: 'blip' })),
+          el('div', { class: 'm-title' },
+            el('h2', { id: 'm-title', text: 'Searching…' }),
+            el('div', { id: 'm-sub', class: 'muted', text: 'Getting ready' })),
+          el('div', { class: 'm-actions' },
+            el('span', { id: 'm-time', class: 'm-time', text: '0:00' }),
+            el('button', { id: 'm-min', class: 'btn quiet', type: 'button', text: 'Minimize', onclick: minimizeMission }),
+            el('button', { id: 'm-cancel', class: 'btn', type: 'button', text: 'Cancel', onclick: () => api('/api/run/cancel', { method: 'POST', body: '{}' }).catch((e) => toast(e.message)) }))),
+        el('div', { class: 'm-bar' }, el('div', { id: 'm-fill', class: 'm-fill' }), el('span', { id: 'm-pct', class: 'm-pct', text: '' })),
+        el('div', { class: 'm-tiles' }, tile('checked', 'Sources checked'), tile('found', 'Jobs matched'), tile('new', 'New for you', 'good'), tile('failed', 'Unreachable', 'bad')),
+        el('div', { class: 'm-sec' }, el('h3', { text: 'Where we are looking' }), el('div', { id: 'm-plan', class: 'm-plan' })),
+        el('div', { class: 'm-sec' }, el('h3', { text: 'Scanning now' }), el('div', { id: 'm-active', class: 'm-active' })),
+        el('div', { class: 'm-sec m-grow' },
+          el('div', { class: 'm-feedhead' }, el('h3', { text: 'Live results' }), el('div', { id: 'm-filters', class: 'pills' })),
+          el('div', { id: 'm-feed', class: 'm-feed', 'aria-live': 'polite' })),
+        el('div', { id: 'm-done', class: 'm-done', hidden: true })));
+    document.body.append(mEl);
+    mEl.addEventListener('click', (e) => { if (e.target === mEl) minimizeMission(); });
+  }
+
+  function openMission(reset) {
+    buildMission();
+    if (reset) { Object.assign(M, { seq: 0, events: [], filter: 'all', started: Date.now(), nums: {} }); $('m-feed').replaceChildren(); $('m-done').hidden = true; $('m-cancel').hidden = false; }
+    M.open = true; mEl.hidden = false; document.body.classList.add('noscroll');
+    clearInterval(M.timer); M.timer = setInterval(tickClock, 500); tickClock();
+    renderFilters();
+  }
+  function minimizeMission() { if (!mEl) return; M.open = false; mEl.hidden = true; document.body.classList.remove('noscroll'); clearInterval(M.timer); }
+  function tickClock() { const st = state.run; const t0 = st && st.started_at && new Date(st.started_at).getFullYear() > 2000 ? new Date(st.started_at).getTime() : M.started; const end = st && st.state !== 'running' && st.finished_at && new Date(st.finished_at).getFullYear() > 2000 ? new Date(st.finished_at).getTime() : Date.now(); const sec = Math.max(0, Math.round((end - t0) / 1000)); $('m-time').textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+
+  const STATUS_ICON = { ok: ['check', 'ok'], empty: ['minus', 'empty'], failed: ['x', 'bad'], skipped: ['skip-forward', 'skip'] };
+  function eventRow(e) {
+    const [ic, cls] = STATUS_ICON[e.status] || ['minus', 'empty'];
+    const detail = e.status === 'ok' ? plural(e.roles, 'role') + (e.new ? ' · ' + e.new + ' new' : '')
+      : e.status === 'empty' ? 'reachable · nothing matched your role' : e.status === 'skipped' ? (e.error || 'skipped') : friendlyError(e.error);
+    return el('div', { class: 'm-row ' + cls, 'data-status': e.status },
+      el('span', { class: 'm-ico' }, icon(ic)),
+      el('span', { class: 'm-name', text: e.kind === 'feed' ? srcName(e.name) : e.name }),
+      el('span', { class: 'm-src', text: e.kind === 'feed' ? 'Job feed' : srcName(e.source) }),
+      el('span', { class: 'm-detail', text: detail }),
+      el('span', { class: 'm-ms', text: e.ms ? (e.ms >= 1000 ? (e.ms / 1000).toFixed(1) + 's' : e.ms + 'ms') : '' }));
+  }
+  function friendlyError(msg) {
+    const m = String(msg || 'failed');
+    if (/404/.test(m)) return 'job board not found (404)';
+    if (/timeout|deadline/i.test(m)) return 'timed out';
+    if (/429|rate/i.test(m)) return 'rate limited';
+    return m.length > 90 ? m.slice(0, 87) + '…' : m;
+  }
+
+  function renderFilters() {
+    const c = { all: M.events.length };
+    M.events.forEach((e) => { c[e.status] = (c[e.status] || 0) + 1; });
+    const defs = [['all', 'All'], ['ok', 'Found'], ['empty', 'Empty'], ['failed', 'Problems'], ['skipped', 'Skipped']];
+    fill($('m-filters'), ...defs.filter(([k]) => k === 'all' || c[k]).map(([k, label]) => el('button', {
+      class: 'pill' + (M.filter === k ? ' on' : ''), type: 'button', text: label + ' ' + (c[k] || 0),
+      onclick: () => { M.filter = k; renderFilters(); redrawFeed(); },
+    })));
+  }
+  function redrawFeed() {
+    const list = M.events.filter((e) => M.filter === 'all' || e.status === M.filter).slice(-150).reverse();
+    $('m-feed').replaceChildren(...list.map(eventRow));
+  }
+
+  function updateMission(st, fresh) {
+    if (!mEl) return;
+    const running = st.state === 'running';
+    const total = st.total || 0, done = st.done || 0;
+    const prefs = state.profile && state.profile.prefs; const preset = prefs && state.profile.presets.find((p) => p.id === prefs.role);
+    const label = preset ? preset.label.toLowerCase() : '';
+    $('m-title').textContent = running ? 'Searching for ' + (label ? label + ' ' : '') + 'jobs' : st.state === 'done' ? 'Search complete' : st.state === 'cancelled' ? 'Search cancelled' : 'Search stopped';
+    const act = st.active || [];
+    $('m-sub').textContent = running ? (act.length ? 'Checking ' + (act[0].kind === 'feed' ? srcName(act[0].name) : act[0].name) + (act.length > 1 ? ' and ' + (act.length - 1) + ' more' : '') + ' · ' + srcName(act[0].source) : (total && done >= total ? 'Finishing up job feeds…' : 'Getting ready…'))
+      : st.state === 'done' ? 'Everything we could reach has been checked.' : st.error || '';
+    mEl.classList.toggle('finished', !running);
+
+    const pct = total ? Math.min(100, Math.round((Math.min(done, total) / total) * 100)) : 0;
+    $('m-fill').style.width = (running && !total ? 8 : (running ? Math.max(3, pct) : 100)) + '%';
+    $('m-fill').classList.toggle('indet', running && !total);
+    $('m-pct').textContent = running && total ? pct + '%' : '';
+
+    if (fresh && fresh.length) { M.events.push(...fresh); if (M.events.length > 600) M.events = M.events.slice(-600); }
+    const counts = st.counts || {};
+    const checked = (counts.ok || 0) + (counts.empty || 0) + (counts.failed || 0) + (counts.skipped || 0);
+    [['checked', checked], ['found', st.roles_found || 0], ['new', Math.max(st.new_roles || 0, M.events.reduce((n, e) => n + (e.new || 0), 0))], ['failed', counts.failed || 0]].forEach(([k, v]) => countUp($('m-' + k), v));
+
+    // plan chips fill as sources complete
+    const doneBy = {};
+    M.events.forEach((e) => { const k = e.kind === 'feed' ? e.name : e.source; doneBy[k] = (doneBy[k] || 0) + 1; });
+    fill($('m-plan'), ...(st.plan || []).map((p) => {
+      const d = Math.min(doneBy[p.source] || 0, p.count); const full = d >= p.count;
+      return el('div', { class: 'm-chip' + (full ? ' full' : d ? ' part' : ''), style: '--p:' + Math.round((d / p.count) * 100) + '%' },
+        el('span', { class: 'm-chip-name', text: srcName(p.source) }),
+        el('span', { class: 'm-chip-n', text: p.feed ? (full ? '✓' : '…') : d + '/' + p.count }));
+    }));
+
+    fill($('m-active'), ...(act.length ? act.slice(0, 8).map((a) => el('span', { class: 'm-now' }, el('i'), a.name, el('em', { text: srcName(a.source) }))) : [el('span', { class: 'muted', text: running ? 'Waiting for the next source…' : 'Nothing running' })]));
+
+    if (fresh && fresh.length) {
+      renderFilters();
+      const visible = fresh.filter((e) => M.filter === 'all' || e.status === M.filter);
+      const feed = $('m-feed');
+      visible.slice().reverse().forEach((e) => { const r = eventRow(e); r.classList.add('enter'); feed.prepend(r); });
+      while (feed.children.length > 150) feed.lastChild.remove();
+    }
+    if (!running) renderDone(st, counts);
+  }
+
+  function renderDone(st, counts) {
+    const box = $('m-done'); $('m-cancel').hidden = true; box.hidden = false;
+    const failed = M.events.filter((e) => e.status === 'failed');
+    const good = st.state === 'done';
+    fill(box,
+      el('div', { class: 'm-donehead' },
+        good ? checkmark() : null,
+        el('div', {}, el('b', { text: good ? (st.new_roles ? plural(st.new_roles, 'new job') + ' found' : 'You are up to date') : 'Search ' + st.state }),
+          el('div', { class: 'muted', text: [plural(counts.ok || 0, 'source') + ' had matches', (counts.failed || 0) ? plural(counts.failed, 'source') + ' unreachable' : '', (counts.skipped || 0) ? plural(counts.skipped, 'source') + ' skipped' : ''].filter(Boolean).join(' · ') }))),
+      el('div', { class: 'm-donebtns' },
+        failed.length ? el('button', { class: 'btn', type: 'button', text: 'Show problems', onclick: () => { M.filter = 'failed'; renderFilters(); redrawFeed(); $('m-feed').scrollIntoView({ block: 'nearest' }); } }) : null,
+        el('button', { class: 'btn go', type: 'button', text: st.new_roles ? 'View ' + plural(st.new_roles, 'new job') : 'Close', onclick: closeMissionDone })));
+  }
+  function checkmark() {
+    const w = el('span', { class: 'm-checkwrap' });
+    w.innerHTML = '<svg class="m-check" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" fill="none"/><path d="M14 27l8 8 16-17" fill="none"/></svg>';
+    return w;
+  }
+  function closeMissionDone() { minimizeMission(); state.status = 'active'; syncTabs(); setView('list'); search().catch(showError); }
+
   // ---------- running ----------
   function renderRun() {
     const st = state.run; const running = st.state === 'running';
@@ -504,16 +654,19 @@
   async function pollRun() {
     clearTimeout(state.pollTimer);
     let st;
-    try { st = await api('/api/run'); } catch { state.pollTimer = setTimeout(pollRun, 2000); return; }
+    try { st = await api('/api/run?since=' + M.seq); } catch { state.pollTimer = setTimeout(pollRun, 2000); return; }
     state.run = st; renderRun();
+    if (st.state === 'running' && !mEl && !M.userClosed) openMission(true);
+    if (mEl) { const fresh = st.events || []; M.seq = st.seq || M.seq; updateMission(st, fresh); }
     if (st.state === 'running') {
       state.wasRunning = true;
       loadFacets().catch(() => {});
-      state.pollTimer = setTimeout(pollRun, 1000);
+      state.pollTimer = setTimeout(pollRun, 700);
       return;
     }
     if (state.wasRunning) {
       state.wasRunning = false;
+      if (M.open) { await loadFacets(); return; }
       if (st.state === 'done') toast(st.new_roles ? '✓ ' + plural(st.new_roles, 'new job') + ' found' : 'Up to date — no new jobs this time');
       else if (st.state === 'cancelled') toast('Search cancelled');
       else if (st.state === 'error') toast('Search failed: ' + st.error, 6000);
@@ -538,7 +691,7 @@
     store.set('mode', mode);
     try {
       state.run = await api('/api/run', { method: 'POST', body: JSON.stringify({ mode }) });
-      state.wasRunning = true; renderRun(); pollRun();
+      state.wasRunning = true; renderRun(); openMission(true); pollRun();
     } catch (e) { toast(e.message, 5000); }
   }
 
@@ -774,6 +927,7 @@
       $('run-menu').hidden = true;
       try { await api('/api/catalog/import', { method: 'POST', body: '{}' }); pollCatalog(); } catch (e) { toast(e.message, 5000); }
     });
+    $('details').addEventListener('click', () => { openMission(false); updateMission(state.run, []); renderFilters(); redrawFeed(); });
     $('cancel').addEventListener('click', () => api('/api/run/cancel', { method: 'POST', body: '{}' }).catch((e) => toast(e.message)));
 
     document.addEventListener('keydown', (e) => {

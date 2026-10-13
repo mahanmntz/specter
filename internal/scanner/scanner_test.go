@@ -155,3 +155,44 @@ func TestSeedAPIURL(t *testing.T) {
 		}
 	}
 }
+
+type flakyIngester struct {
+	failures int
+	err      error
+	calls    int
+}
+
+func (f *flakyIngester) ExtractBySeed(context.Context, seeds.SeedTarget) (*ats.CompanyMeta, error) {
+	f.calls++
+	if f.calls <= f.failures {
+		return nil, f.err
+	}
+	return &ats.CompanyMeta{Name: "Acme"}, nil
+}
+
+func TestTransientNetworkErrorsAreRetriedOnce(t *testing.T) {
+	ing := &flakyIngester{failures: 1, err: errors.New(`Get "https://x": net/http: TLS handshake timeout`)}
+	obs := &recorder{}
+	s := &Scanner{Ingester: ing, Frontier: &fakeFrontier{crawl: true}, Store: fakeStore{}, Observer: obs}
+	if _, err := s.ProcessSeed(context.Background(), seed); err != nil {
+		t.Fatal(err)
+	}
+	if ing.calls != 2 {
+		t.Errorf("a transient error should be retried exactly once, got %d calls", ing.calls)
+	}
+	if strings.Contains(fmt.Sprint(obs.logs), "extraction error") {
+		t.Errorf("a recovered failure must not be reported as an error: %v", obs.logs)
+	}
+}
+
+func TestPermanentErrorsAreNotRetried(t *testing.T) {
+	ing := &flakyIngester{failures: 5, err: errors.New("greenhouse API returned status 404 for token acme")}
+	s := &Scanner{Ingester: ing, Frontier: &fakeFrontier{crawl: true}, Store: fakeStore{}, Observer: &recorder{}}
+	_, _ = s.ProcessSeed(context.Background(), seed)
+	if ing.calls != 1 {
+		t.Errorf("a 404 is permanent and must not be retried, got %d calls", ing.calls)
+	}
+	if !isTransient(errors.New("read: connection reset by peer")) || isTransient(errors.New("status 404")) {
+		t.Error("isTransient misclassifies")
+	}
+}

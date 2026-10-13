@@ -280,7 +280,9 @@ Adjust anything by tapping chips (pick from the 300+ skills in the catalog or ad
 
 **No GitHub?** Upload your CV as a PDF instead. The text is read in memory on your computer (nothing is uploaded or saved); skills count more the more you mention them and when they are listed under a "Skills" heading, and things you say you are *learning* are ignored. Or skip import and pick a role manually.
 
-Specter then searches its company catalog plus RemoteOK and Hacker News in the background, with live progress, and fills the page as results arrive. Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
+Specter then searches its company catalog plus six job feeds. A full-screen **live view** shows the plan up front (which sources, how many companies each), then every source as it is checked: what it found, what was empty, what was unreachable and why, with running totals and a timer. Minimize it to keep browsing, or cancel any time.
+
+![Live search view](docs/search.png) Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
 
 | Light | Dark |
 |---|---|
