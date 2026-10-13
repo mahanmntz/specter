@@ -55,7 +55,10 @@
 
   async function api(path, opts = {}) {
     const headers = { ...(opts.headers || {}) };
-    if (opts.method && opts.method !== 'GET') { headers['Content-Type'] = 'application/json'; headers['X-Specter'] = '1'; }
+    if (opts.method && opts.method !== 'GET') {
+      if (!(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json'; // the browser sets multipart boundaries itself
+      headers['X-Specter'] = '1';
+    }
     const r = await fetch(path, { ...opts, headers });
     const text = await r.text();
     let data = null; try { data = JSON.parse(text); } catch { /* not json */ }
@@ -529,6 +532,7 @@
   }
 
   // ---------- setup wizard ----------
+  const CV_SCAN_LINES = ['Reading your CV…', 'Finding the tools you use…', 'Counting what you mention most…', 'Working out your role…'];
   const SCAN_LINES = ['Reading your public profile…', 'Looking through your repositories…', 'Spotting languages and tools…', 'Working out your role…'];
 
   function openSetup(mode) {
@@ -540,7 +544,7 @@
     draft.skills = draft.skills || []; draft.seniority = draft.seniority || [];
     const presetOf = (id) => pr.presets.find((p) => p.id === id);
     let step = first ? 'intro' : 'profile';
-    let detected = null; let err = ''; let query = ''; let scanTimer = null; let skillsTouched = !!existing; let showAlso = false;
+    let detected = null; let err = ''; let query = ''; let scanTimer = null; let skillsTouched = !!existing; let showAlso = false; let scanSource = 'github'; let scanLabel = '';
     if (!draft.skills.length) draft.skills = presetOf(draft.role).skills.slice();
 
     const dlg = $('setup');
@@ -566,6 +570,8 @@
       const gh = el('input', { class: 'input', placeholder: 'octocat', value: draft.github, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'GitHub username' });
       const go = () => { draft.name = name.value.trim(); draft.github = gh.value.trim(); draft.github ? runImport() : (step = 'profile', draw()); };
       [name, gh].forEach((i) => i.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } }));
+      const cvInput = el('input', { type: 'file', accept: 'application/pdf,.pdf', hidden: true, 'aria-label': 'Upload your CV as a PDF' });
+      cvInput.addEventListener('change', () => { const f = cvInput.files && cvInput.files[0]; if (f) { draft.name = name.value.trim(); runCvImport(f); } });
       fill(dlg,
         el('div', { class: 'w-body' },
           el('div', { class: 'steps' }, el('i', { class: 'on' }), el('i'), el('i')),
@@ -574,7 +580,11 @@
           err ? el('div', { class: 'err', role: 'alert', text: err }) : null,
           el('label', { class: 'field' }, el('span', { text: 'Your name' }), name),
           pr.can_import ? el('label', { class: 'field' }, el('span', { text: 'GitHub username' }), el('div', { class: 'prefixed' }, el('em', { text: 'github.com/' }), gh)) : null,
-          pr.can_import ? el('div', { class: 'note' }, icon('lock'), el('span', { text: 'We read your public repositories (languages, topics) to suggest your skills and role. It happens on your computer; nothing is stored anywhere else.' })) : null),
+          pr.can_import ? el('div', { class: 'note' }, icon('lock'), el('span', { text: 'We read your public repositories and profile README (languages, topics) to suggest your skills and role. It happens on your computer; nothing is stored anywhere else.' })) : null,
+          el('div', { class: 'or' }, el('span', { text: 'or' })),
+          el('button', { class: 'btn upload', type: 'button', onclick: () => cvInput.click() }, icon('file-text'), 'Upload your CV (PDF)'),
+          cvInput,
+          el('div', { class: 'hint small', text: 'Read in memory on this computer. The file is never uploaded or saved.' })),
         el('div', { class: 'w-foot' },
           el('span', { class: 'grow' }),
           el('button', { class: 'btn quiet', type: 'button', onclick: () => { draft.name = name.value.trim(); step = 'profile'; err = ''; draw(); }, text: pr.can_import ? 'Skip, I’ll choose myself' : 'Continue' }),
@@ -584,24 +594,38 @@
 
     // -- step 2: scanning
     function drawScan() {
-      const line = el('div', { text: SCAN_LINES[0] });
+      const lines = scanSource === 'cv' ? CV_SCAN_LINES : SCAN_LINES;
+      const line = el('div', { text: lines[0] });
       let i = 0;
-      scanTimer = setInterval(() => { i = (i + 1) % SCAN_LINES.length; line.textContent = SCAN_LINES[i]; }, 1300);
+      scanTimer = setInterval(() => { i = (i + 1) % lines.length; line.textContent = lines[i]; }, 1300);
       dlg.oncancel = (e) => e.preventDefault();
       dlg.replaceChildren(el('div', { class: 'w-body' },
         el('div', { class: 'steps' }, el('i', { class: 'on' }), el('i', { class: 'on' }), el('i')),
-        el('div', { class: 'scan' }, el('div', { class: 'spin' }), line, el('div', { class: 'hint', text: 'github.com/' + draft.github }))));
+        el('div', { class: 'scan' }, el('div', { class: 'spin' }), line, el('div', { class: 'hint', text: scanSource === 'cv' ? scanLabel : 'github.com/' + draft.github }))));
+    }
+
+    function applyDetected(d) {
+      detected = d;
+      if (d.login) draft.github = d.login;
+      draft.name = draft.name || d.name; draft.avatar = d.avatar || draft.avatar; draft.role = d.role;
+      const picked = d.skills.filter((x) => x.selected).map((x) => x.name);
+      draft.skills = picked.length ? picked : presetOf(d.role).skills.slice();
+      skillsTouched = true; step = 'profile';
     }
 
     async function runImport() {
-      err = ''; step = 'scan'; draw();
+      err = ''; scanSource = 'github'; step = 'scan'; draw();
       try {
-        const d = await api('/api/github/import', { method: 'POST', body: JSON.stringify({ input: draft.github }) });
-        detected = d;
-        draft.github = d.login; draft.name = draft.name || d.name; draft.avatar = d.avatar || draft.avatar; draft.role = d.role;
-        const picked = d.skills.filter((s) => s.selected).map((s) => s.name);
-        draft.skills = picked.length ? picked : presetOf(d.role).skills.slice();
-        skillsTouched = true; step = 'profile';
+        applyDetected(await api('/api/github/import', { method: 'POST', body: JSON.stringify({ input: draft.github }) }));
+      } catch (e) { err = e.message; step = 'intro'; }
+      draw();
+    }
+
+    async function runCvImport(file) {
+      err = ''; scanSource = 'cv'; scanLabel = file.name; step = 'scan'; draw();
+      try {
+        const fd = new FormData(); fd.append('file', file);
+        applyDetected(await api('/api/cv/import', { method: 'POST', body: fd }));
       } catch (e) { err = e.message; step = 'intro'; }
       draw();
     }
@@ -633,13 +657,13 @@
         if (!draft.skills.length) selBox.append(el('span', { class: 'hint', text: 'Nothing selected: we’ll use the defaults for your role.' }));
 
         const q = lc(query.trim());
-        const tip = (sk) => [sk.repos ? plural(sk.repos, 'repo') : '', sk.last_used && ago(sk.last_used) ? 'last used ' + ago(sk.last_used) : '', sk.from_profile ? 'mentioned in your profile' : ''].filter(Boolean).join(' · ');
+        const tip = (sk) => [sk.repos ? plural(sk.repos, detected && detected.source === 'cv' ? 'mention' : 'repo') : '', sk.last_used && ago(sk.last_used) ? 'last used ' + ago(sk.last_used) : '', sk.from_profile ? 'mentioned in your profile' : ''].filter(Boolean).join(' · ');
         const strong = detected ? detected.skills.filter((x) => x.selected) : [];
         const weak = detected ? detected.skills.filter((x) => !x.selected) : [];
         const detNames = strong.concat(weak).map((x) => x.name);
         const matches = (x) => !q || lc(x.name).includes(q);
         const alsoLink = weak.length && !q
-          ? el('button', { class: 'link', type: 'button', onclick: () => { showAlso = !showAlso; drawSkills(); }, text: showAlso ? 'Show fewer' : 'Show ' + weak.length + ' more found on GitHub' })
+          ? el('button', { class: 'link', type: 'button', onclick: () => { showAlso = !showAlso; drawSkills(); }, text: showAlso ? 'Show fewer' : 'Show ' + weak.length + ' more found ' + (detected.source === 'cv' ? 'in your CV' : 'on GitHub') })
           : null;
         fill(detBox, ...strong.filter(matches).map((x) => chip(x.name, tip(x), drawSkills)),
           ...(showAlso || q ? weak.filter(matches).map((x) => chip(x.name, tip(x), drawSkills)) : []), alsoLink);
@@ -676,10 +700,11 @@
         ? el('div', { class: 'who' }, meBadge(draft),
           el('div', {}, el('b', { text: draft.name || draft.github }),
             draft.github ? el('span', { text: '@' + draft.github + (detected ? ' · read ' + plural(detected.repos_analyzed, 'repository').replace('repositorys', 'repositories') + (detected.readme_used ? ' and your profile README' : '') : '') }) : null,
-            detected && detected.bio ? el('p', { text: detected.bio }) : null))
+            detected && detected.bio ? el('p', { text: detected.bio }) : null,
+            detected && detected.source === 'cv' ? el('span', { text: 'Read from your CV · ' + plural(detected.skills.length, 'skill') + ' found' }) : null))
         : null;
 
-      const detWrap = el('div', {}, el('span', { class: 'w-label' }, 'From your GitHub', el('span', { class: 'hint', text: 'what you use most, recent work first' })), detBox);
+      const detWrap = el('div', {}, el('span', { class: 'w-label' }, detected && detected.source === 'cv' ? 'From your CV' : 'From your GitHub', el('span', { class: 'hint', text: detected && detected.source === 'cv' ? 'mentioned most, and listed under Skills' : 'what you use most, recent work first' })), detBox);
 
       fill(dlg,
         el('div', { class: 'w-body' },
@@ -696,7 +721,7 @@
           check('Worldwide remote only', 'worldwide_only'),
           check('Also search RemoteOK & Hacker News “Who is hiring”', 'feeds')),
         el('div', { class: 'w-foot' },
-          pr.can_import ? el('button', { class: 'btn quiet', type: 'button', onclick: () => { step = 'intro'; err = ''; draw(); }, text: detected || draft.github ? '← GitHub' : 'Import from GitHub' }) : null,
+          pr.can_import ? el('button', { class: 'btn quiet', type: 'button', onclick: () => { step = 'intro'; err = ''; draw(); }, text: detected || draft.github ? '← Back' : 'Import from GitHub or CV' }) : null,
           el('span', { class: 'grow' }),
           first ? null : el('button', { class: 'btn', type: 'button', onclick: () => dlg.close(), text: 'Cancel' }),
           first ? null : el('button', { class: 'btn', type: 'button', onclick: () => save(false), text: 'Save' }),

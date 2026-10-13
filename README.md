@@ -276,7 +276,9 @@ Edit `.env` to configure your environment variables:
 - picks your **role** from 13 options (Software Engineer, Backend, Full-stack, Frontend, DevOps/SRE, Data, ML/AI, Mobile, Security, QA, Embedded, Blockchain, Game Dev). If your work is spread evenly across several areas you are a generalist **Software Engineer** rather than being forced into one box, and if your README says what you do ("Backend engineer…"), that wins;
 - pre-selects only the skills you use **most and most recently**, not everything you ever touched. Recent, sustained, starred work counts more; tutorials, forks and one-off experiments count less; skills you say you are *learning* are ignored. Hover a skill to see how many repos use it and when you last did. Weaker findings sit behind "Show more".
 
-Adjust anything by tapping chips (pick from the skill catalog or add your own), then press **Find my jobs**. No GitHub account? Skip that step and pick a role manually.
+Adjust anything by tapping chips (pick from the 300+ skills in the catalog or add your own), then press **Find my jobs**.
+
+**No GitHub?** Upload your CV as a PDF instead. The text is read in memory on your computer (nothing is uploaded or saved); skills count more the more you mention them and when they are listed under a "Skills" heading, and things you say you are *learning* are ignored. Or skip import and pick a role manually.
 
 Specter then searches its company catalog plus RemoteOK and Hacker News in the background, with live progress, and fills the page as results arrive. Press **Find jobs** any time to refresh (the ▾ menu switches between a quick scan of the top 25 companies and a full scan).
 
