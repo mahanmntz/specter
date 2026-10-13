@@ -83,3 +83,19 @@ func TestSkillMatchUsesWordBoundaries(t *testing.T) {
 		t.Error("C must not match inside 'cache'")
 	}
 }
+
+func TestCatalogIsBroad(t *testing.T) {
+	total := 0
+	for _, g := range SkillCatalog() {
+		total += len(g.Skills)
+	}
+	if total < 300 {
+		t.Errorf("the catalog should cover a wide range of tools; only %d skills", total)
+	}
+	// Spot-check modern tooling across roles.
+	for _, name := range []string{"Axum", "Hugging Face", "Playwright", "eBPF", "Zephyr", "Foundry", "Vault", "Storybook", "Kotlin Multiplatform", "OAuth", "Shaders"} {
+		if _, ok := CanonicalSkill(name); !ok {
+			t.Errorf("missing %s", name)
+		}
+	}
+}
