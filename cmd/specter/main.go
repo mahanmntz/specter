@@ -617,6 +617,9 @@ func runServe(args []string) {
 		Skills: signals.GetUserSkills(),
 		Seeds:  func() ([]seeds.SeedTarget, error) { return seeds.Effective(context.Background(), store) },
 		GitHub: ghprofile.NewClient(),
+		Import: func(ctx context.Context, discover bool, progress func(done, total int)) (int, error) {
+			return importRemoteIntech(ctx, store, discover, progress)
+		},
 		Run: func(ctx context.Context, opts runner.Options, prog *web.Progress) (runner.Result, error) {
 			return runner.Run(ctx, store, opts, prog)
 		},

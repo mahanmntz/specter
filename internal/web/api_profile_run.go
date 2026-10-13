@@ -32,12 +32,13 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	prefs := s.prefs
 	s.mu.RUnlock()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"configured": prefs != nil,
-		"prefs":      prefs,
-		"presets":    presets,
-		"can_run":    s.opts.Run != nil,
-		"can_import": s.opts.GitHub != nil,
-		"catalog":    signals.SkillCatalog(),
+		"configured":        prefs != nil,
+		"prefs":             prefs,
+		"presets":           presets,
+		"can_run":           s.opts.Run != nil,
+		"can_import":        s.opts.GitHub != nil,
+		"can_add_companies": s.opts.Import != nil,
+		"catalog":           signals.SkillCatalog(),
 	})
 }
 

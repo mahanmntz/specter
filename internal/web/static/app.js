@@ -521,6 +521,17 @@
     }
   }
 
+  async function pollCatalog() {
+    let st;
+    try { st = await api('/api/catalog/import'); } catch { return; }
+    $('runbar').hidden = !st.running;
+    if (st.running) {
+      $('runfill').classList.toggle('indet', !st.total); if (st.total) $('runfill').style.width = Math.max(4, st.done / st.total * 100) + '%';
+      $('runtext').textContent = st.total ? `Adding companies · checking ${st.done} of ${st.total}` : 'Adding companies · downloading the directory…';
+      setTimeout(pollCatalog, 1500);
+    } else if (st.finished) toast(st.error ? 'Could not add companies: ' + st.error : '✓ Added ' + plural(st.added, 'company') + ' to your catalog', 6000);
+  }
+
   async function startRun(mode) {
     if (!state.profile || !state.profile.configured) { openSetup('first'); return; }
     mode = mode || store.get('mode', 'quick');
@@ -759,6 +770,10 @@
     $('run-menu-btn').addEventListener('click', (e) => { e.stopPropagation(); $('run-menu').hidden = !$('run-menu').hidden; });
     document.querySelectorAll('#run-menu button').forEach((b) => b.addEventListener('click', () => { $('run-menu').hidden = true; startRun(b.dataset.mode); }));
     document.addEventListener('click', () => { $('run-menu').hidden = true; });
+    $('add-companies').addEventListener('click', async () => {
+      $('run-menu').hidden = true;
+      try { await api('/api/catalog/import', { method: 'POST', body: '{}' }); pollCatalog(); } catch (e) { toast(e.message, 5000); }
+    });
     $('cancel').addEventListener('click', () => api('/api/run/cancel', { method: 'POST', body: '{}' }).catch((e) => toast(e.message)));
 
     document.addEventListener('keydown', (e) => {
@@ -775,6 +790,7 @@
     try {
       state.profile = await api('/api/profile');
       if (!state.profile.can_run) $('run').parentElement.hidden = true;
+      $('add-companies').hidden = !state.profile.can_add_companies;
       renderChip();
       if (state.profile.configured && !hadQuery) {
         const pf = state.profile.prefs;

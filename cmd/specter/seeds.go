@@ -206,6 +206,7 @@ func seedsImport(args []string) {
 	fs.String("db", "specter.db", "SQLite database path")
 	discover := fs.Bool("discover", false, "Also probe Greenhouse/Lever/Ashby for companies whose careers page is their own site (slower)")
 	limit := fs.Int("limit", 0, "Only look at the first N companies (0 = all)")
+	conc := fs.Int("concurrency", 12, "Parallel probes (requests per host are still paced politely)")
 	fs.Parse(args[1:])
 	store, ctx, cancel := openSeedStore(fs)
 	defer store.Close()
@@ -224,7 +225,7 @@ func seedsImport(args []string) {
 	}
 
 	fmt.Fprintf(os.Stderr, "Validating job boards for %d companies…\n", len(companies))
-	sum := seedtools.BuildSeeds(ctx, f, companies, *discover, 6, func(done, total int) {
+	sum := seedtools.BuildSeeds(ctx, f, companies, *discover, *conc, func(done, total int) {
 		fmt.Fprintf(os.Stderr, "\r  %d/%d", done, total)
 	})
 	fmt.Fprintln(os.Stderr)
@@ -253,4 +254,15 @@ func seedsReset(args []string) {
 		os.Exit(1)
 	}
 	fmt.Println("Catalog reset to the built-in companies.")
+}
+
+// importRemoteIntech downloads the directory, validates boards and stores new ones; used by the web UI.
+func importRemoteIntech(ctx context.Context, store *storage.Store, discover bool, progress func(done, total int)) (int, error) {
+	archive := crawler.NewFetcher(crawler.FetcherConfig{Timeout: 90 * time.Second, MaxBodyBytes: 64 * 1024 * 1024})
+	companies, err := seedtools.FetchRemoteIntech(ctx, archive)
+	if err != nil {
+		return 0, err
+	}
+	sum := seedtools.BuildSeeds(ctx, seedFetcher(20*time.Second), companies, discover, 12, progress)
+	return seeds.AddUser(ctx, store, sum.Valid)
 }

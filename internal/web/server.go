@@ -50,6 +50,8 @@ type Options struct {
 	Run RunFunc
 	// GitHub reads public GitHub profiles for onboarding; nil disables import.
 	GitHub GitHubAnalyzer
+	// Import adds companies to the catalog; nil hides the button.
+	Import ImportFunc
 	// Seeds returns the company catalog to scan; defaults to the embedded catalog.
 	Seeds func() ([]seeds.SeedTarget, error)
 }
@@ -63,9 +65,10 @@ type Server struct {
 	baseCtx  context.Context
 	stopAll  context.CancelFunc
 
-	mu     sync.RWMutex
-	prefs  *Prefs // nil until the user completes setup
-	skills []string
+	catalog importState
+	mu      sync.RWMutex
+	prefs   *Prefs // nil until the user completes setup
+	skills  []string
 }
 
 // New creates a Server and restores any saved profile.
@@ -95,6 +98,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/profile", s.handlePutProfile)
 	mux.HandleFunc("POST /api/github/import", s.handleGitHubImport)
 	mux.HandleFunc("POST /api/cv/import", s.handleCVImport)
+	mux.HandleFunc("POST /api/catalog/import", s.handleCatalogStart)
+	mux.HandleFunc("GET /api/catalog/import", s.handleCatalogStatus)
 	mux.HandleFunc("GET /api/run", s.handleRunStatus)
 	mux.HandleFunc("POST /api/run", s.handleRunStart)
 	mux.HandleFunc("POST /api/run/cancel", s.handleRunCancel)
