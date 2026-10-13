@@ -35,13 +35,20 @@
   </header>
 
   <main class="wrap">
+    <div id="views" class="seg views" role="tablist" aria-label="View" hidden>
+      <button data-view="list" class="on">Jobs</button>
+      <button data-view="board">Board <span id="due-badge" class="due-badge" hidden></span></button>
+    </div>
+
     <section class="hero" id="hero" hidden>
       <h1 id="greeting"></h1>
       <p id="subgreeting" class="muted"></p>
       <div id="stats" class="stats"></div>
     </section>
 
-    <section class="filters" aria-label="Filters">
+    <section id="board" class="board" hidden aria-label="Application board"></section>
+
+    <section class="filters" id="filters" aria-label="Filters">
       <div class="pills">
         <button id="global" class="pill" aria-pressed="false">🌍 Worldwide</button>
         <button id="contractor" class="pill" aria-pressed="false">🤝 Contractor</button>
@@ -69,7 +76,7 @@
       </div>
     </section>
 
-    <div class="listhead">
+    <div class="listhead" id="listhead">
       <div id="tabs" class="seg" role="tablist">
         <button data-status="active" class="on">Jobs</button>
         <button data-status="saved">Saved</button>

@@ -11,7 +11,9 @@
   const state = {
     status: 'active', levels: new Set(), keywords: new Set(), offset: 0, jobs: [], total: 0,
     facets: null, profile: null, run: { state: 'idle' }, wasRunning: false, pollTimer: null, sel: -1, drawerJob: null,
+    view: 'list', pipeline: null,
   };
+  const STAGES = [['saved', 'Saved'], ['applied', 'Applied'], ['interview', 'Interview'], ['offer', 'Offer'], ['rejected', 'Rejected']];
 
   // ---------- helpers ----------
   function el(tag, props = {}, ...kids) {
@@ -101,7 +103,8 @@
   const hasFilters = () => { const p = params(0); p.delete('status'); p.delete('sort'); return [...p.keys()].length > 0; };
 
   function persistURL() {
-    const s = params(0).toString();
+    const p = params(0); if (state.view === 'board') p.set('view', 'board');
+    const s = p.toString();
     try { history.replaceState(null, '', s ? '?' + s : location.pathname); } catch { /* ignore */ }
     $('reset').hidden = !hasFilters();
     renderStats();
@@ -211,6 +214,9 @@
     if (job.global_remote) tags.push(el('span', { class: 'tag good', text: 'Worldwide' }));
     if (!job.global_remote && job.policy) tags.push(el('span', { class: 'tag', title: 'Who can apply', text: job.policy }));
     if (job.contractor_friendly) tags.push(el('span', { class: 'tag good', text: 'Contractor' }));
+    if (job.closed) tags.push(el('span', { class: 'tag closed', text: 'Closed' }));
+    if (['applied', 'interview', 'offer'].includes(job.status)) tags.push(el('span', { class: 'tag stage', text: stageText(job) }));
+    if (isDue(job)) tags.push(el('span', { class: 'tag due', text: 'Follow up' }));
     if (isNew) tags.push(el('span', { class: 'tag warn', text: 'New' }));
     if (job.seniority && job.seniority !== 'Mid/Standard') tags.push(el('span', { class: 'tag', text: shortLevel(job.seniority) }));
     if (job.compensation) tags.push(el('span', { class: 'tag', text: job.compensation }));
@@ -238,6 +244,19 @@
     article.addEventListener('click', () => { state.sel = state.jobs.indexOf(job); markSel(); openDrawer(job); });
     return article;
   }
+  const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
+  function isDue(job) { if (!job.follow_up_at || job.status === 'hidden') return false; const d = new Date(job.follow_up_at); if (isNaN(d) || d.getFullYear() < 2000) return false; const end = startOfToday(); end.setDate(end.getDate() + 1); return d < end; }
+  function stageText(job) { const label = (STAGES.find((x) => x[0] === job.status) || [0, job.status])[1]; const a = job.applied_at && ago(job.applied_at); return label + (a ? ' · ' + a : ''); }
+  function followText(job) {
+    if (!job.follow_up_at) return '';
+    const d = new Date(job.follow_up_at); if (isNaN(d) || d.getFullYear() < 2000) return '';
+    const days = Math.round((d - startOfToday()) / 864e5);
+    if (days < -30) return 'Follow-up overdue';
+    if (days < 0) return 'Follow-up ' + Math.abs(days) + 'd overdue';
+    if (days === 0) return 'Follow up today';
+    return 'Follow up in ' + days + 'd';
+  }
+  const dateInput = (iso) => { const d = new Date(iso); return isNaN(d) || d.getFullYear() < 2000 ? '' : d.toISOString().slice(0, 10); };
   const SOURCES = { remoteok: 'RemoteOK', hn: 'Hacker News', remotive: 'Remotive', jobicy: 'Jobicy', himalayas: 'Himalayas', arbeitnow: 'Arbeitnow' };
   const sourceOf = (job) => SOURCES[String(job.id).split('-')[0]] || '';
   const shortLevel = (s) => s.replace('Staff/Principal', 'Staff+').replace('Lead/Engineering Manager', 'Lead');
@@ -251,6 +270,7 @@
     if (!visible) { state.jobs = state.jobs.filter((j) => j !== job); state.total--; if (state.drawerJob === job) closeDrawer(); }
     render(); markSel();
     if (state.drawerJob === job) openDrawer(job);
+    if (state.view === 'board') loadBoard().catch(() => {});
   }
 
   // ---------- keyboard selection ----------
@@ -293,13 +313,124 @@
           el('h3', { text: 'Skill match · ' + job.score + '%' }),
           el('div', { class: 'meter' + (job.score >= 80 ? ' hi' : '') }, el('i', { style: 'width:' + job.score + '%' })),
           matched.size ? el('div', { class: 'tags' }, ...(job.matches || []).map((m) => el('span', { class: 'tag hit', text: m }))) : null) : null,
+        trackingSection(job),
         extra.length ? el('div', { class: 'sec' }, el('h3', { text: 'Also mentioned' }), el('div', { class: 'tags' }, ...extra.map((k) => el('span', { class: 'tag', text: k })))) : null),
       el('div', { class: 'd-foot' },
         el('a', { class: 'btn go grow', href: link, target: '_blank', rel: 'noopener noreferrer', style: 'display:grid;place-items:center', text: 'Apply ↗' }),
-        statusButton(job, 'saved', { title: () => 'Save', text: (on) => (on ? '★ Saved' : '☆ Save') }, 'btn'),
-        statusButton(job, 'applied', { title: () => 'Mark as applied', text: (on) => (on ? '✓ Applied' : 'Mark applied') }, 'btn'),
         statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), text: (on) => (on ? 'Unhide' : 'Hide') }, 'btn quiet')));
     d.hidden = false; $('scrim').hidden = false;
+  }
+
+  // ---------- tracking (drawer) ----------
+  async function track(job, patch) {
+    await api('/api/status', { method: 'POST', body: JSON.stringify({ id: job.id, ...patch }) });
+    loadFacets().catch(() => {});
+    if (state.view === 'board') loadBoard().catch(() => {});
+  }
+
+  function trackingSection(job) {
+    const hint = el('div', { class: 'savedhint' });
+    const flash = (t) => { hint.textContent = t; setTimeout(() => { hint.textContent = ''; }, 1600); };
+    const refresh = () => { render(); markSel(); openDrawer(job); };
+
+    const pills = el('div', { class: 'stagepills' }, ...STAGES.map(([id, label]) => el('button', {
+      class: 'pill' + (job.status === id ? ' on' : ''), type: 'button', text: label,
+      onclick: async () => {
+        const next = job.status === id ? '' : id;
+        try {
+          await track(job, { status: next });
+          const d = await api('/api/pipeline').catch(() => null);
+          const fresh = d && d.stages.flatMap((st) => st.jobs).find((j) => j.id === job.id);
+          Object.assign(job, { status: next, applied_at: fresh ? fresh.applied_at : job.applied_at, follow_up_at: fresh ? fresh.follow_up_at : '' });
+          if (!next) { job.follow_up_at = ''; }
+          refresh();
+        } catch (e) { toast(e.message); }
+      },
+    })));
+
+    const note = el('textarea', { class: 'note', placeholder: 'Notes: recruiter, salary talk, interview prep…', maxlength: '4000', 'aria-label': 'Notes' });
+    note.value = job.note || '';
+    note.addEventListener('blur', async () => {
+      if (note.value === (job.note || '')) return;
+      try { await track(job, { note: note.value }); job.note = note.value; flash('Saved'); } catch (e) { toast(e.message); }
+    });
+
+    const date = el('input', { type: 'date', value: dateInput(job.follow_up_at), 'aria-label': 'Follow-up date' });
+    date.addEventListener('change', async () => {
+      try { await track(job, { follow_up: date.value }); job.follow_up_at = date.value ? date.value + 'T00:00:00Z' : ''; flash(date.value ? 'Reminder set' : 'Reminder cleared'); render(); markSel(); } catch (e) { toast(e.message); }
+    });
+
+    return el('div', { class: 'sec' },
+      el('h3', { text: 'Tracking' }), pills,
+      job.status ? el('div', { class: 'followrow' }, el('span', { class: 'muted', text: 'Follow up on' }), date,
+        job.follow_up_at ? el('button', { class: 'link', type: 'button', text: 'Clear', onclick: () => { date.value = ''; date.dispatchEvent(new Event('change')); } }) : null,
+        isDue(job) ? el('span', { class: 'tag due', text: followText(job) }) : null) : null,
+      el('div', { style: 'margin-top:12px' }, note), hint);
+  }
+
+  // ---------- board ----------
+  async function loadBoard() {
+    state.pipeline = await api('/api/pipeline');
+    renderBoard();
+    const due = state.pipeline.follow_ups_due;
+    $('due-badge').hidden = !due; $('due-badge').textContent = due ? due + ' due' : '';
+  }
+
+  function renderBoard() {
+    const data = state.pipeline; if (!data) return;
+    fill($('board'), ...data.stages.map((st) => {
+      const col = el('div', { class: 'col', 'data-stage': st.id },
+        el('h3', {}, el('span', { text: st.label }), el('b', { text: String(st.jobs.length) })));
+      col.addEventListener('dragover', (e) => { e.preventDefault(); col.classList.add('over'); });
+      col.addEventListener('dragleave', () => col.classList.remove('over'));
+      col.addEventListener('drop', async (e) => {
+        e.preventDefault(); col.classList.remove('over');
+        const id = e.dataTransfer.getData('text/plain');
+        const job = data.stages.flatMap((x) => x.jobs).find((j) => j.id === id);
+        if (job && job.status !== st.id) moveTo(job, st.id);
+      });
+      if (!st.jobs.length) col.append(el('div', { class: 'empty-col', text: st.id === 'saved' ? 'Save jobs to track them' : 'Drag jobs here' }));
+      st.jobs.forEach((j) => col.append(boardCard(j, st.id)));
+      return col;
+    }));
+  }
+
+  function boardCard(job, stageId) {
+    const idx = STAGES.findIndex((x) => x[0] === stageId);
+    const next = STAGES[idx + 1] && stageId !== 'offer' ? STAGES[idx + 1] : null;
+    const due = isDue(job); const f = followText(job);
+    const card = el('article', { class: 'bcard', draggable: 'true', tabindex: '0' },
+      el('div', { class: 't', text: job.title }),
+      el('div', { class: 'c', text: job.company }),
+      job.note ? el('div', { class: 'n', text: job.note }) : null,
+      el('div', { class: 'meta2' },
+        job.closed ? el('span', { class: 'tag closed', text: 'Closed' }) : null,
+        job.applied_at && ago(job.applied_at) ? el('span', { class: 'tag', text: 'Applied ' + ago(job.applied_at) }) : null,
+        f ? el('span', { class: 'tag' + (due ? ' due' : ''), text: f }) : null,
+        next ? el('button', { class: 'go', type: 'button', title: 'Move to ' + next[1], 'aria-label': 'Move to ' + next[1], text: '→', onclick: (e) => { e.stopPropagation(); moveTo(job, next[0]); } }) : null));
+    card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', job.id); e.dataTransfer.effectAllowed = 'move'; card.classList.add('dragging'); });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('click', () => openDrawer(job));
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter') openDrawer(job); });
+    return card;
+  }
+
+  async function moveTo(job, stage) {
+    try { await track(job, { status: stage }); await loadBoard(); if (state.drawerJob && state.drawerJob.id === job.id) { const j = state.pipeline.stages.flatMap((x) => x.jobs).find((x) => x.id === job.id); if (j) openDrawer(j); } }
+    catch (e) { toast(e.message); }
+  }
+
+  function setView(view) {
+    state.view = view;
+    document.querySelectorAll('#views button').forEach((b) => b.classList.toggle('on', b.dataset.view === view));
+    const board = view === 'board';
+    document.body.classList.toggle('wide', board);
+    $('board').hidden = !board;
+    ['filters', 'listhead', 'list', 'hero'].forEach((id) => { $(id).hidden = board || (id === 'hero' && (!state.profile || !state.profile.configured)); });
+    $('loadmore').hidden = board || state.jobs.length >= state.total;
+    $('empty').hidden = board || state.total !== 0;
+    try { const u = new URL(location.href); board ? u.searchParams.set('view', 'board') : u.searchParams.delete('view'); history.replaceState(null, '', u); } catch { /* ignore */ }
+    if (board) loadBoard().catch(showError); else render();
   }
 
   // ---------- facets / filters UI ----------
@@ -307,6 +438,7 @@
     const f = await api('/api/facets');
     state.facets = f;
     document.title = 'Specter' + (f.total ? ' · ' + f.total : '');
+    $('due-badge').hidden = !f.follow_ups; $('due-badge').textContent = f.follow_ups ? f.follow_ups + ' due' : '';
     $('keywords').replaceChildren(...(f.keywords || []).slice(0, 24).map((k) => el('button', {
       class: 'pill' + (state.keywords.has(k.name) ? ' on' : ''), text: k.name,
       onclick: (e) => { state.keywords.has(k.name) ? state.keywords.delete(k.name) : state.keywords.add(k.name); e.currentTarget.classList.toggle('on'); search().catch(showError); },
@@ -529,7 +661,7 @@
       const save = async (thenRun) => {
         try { await api('/api/profile', { method: 'PUT', body: JSON.stringify(draft) }); } catch (e) { toast(e.message, 5000); return; }
         dlg.close();
-        state.profile = await api('/api/profile'); renderChip();
+        state.profile = await api('/api/profile'); renderChip(); $('views').hidden = false;
         if (first || !hasFilters()) { pressed('global', !!draft.worldwide_only); state.levels = new Set(draft.seniority); renderLevels(); }
         await loadFacets(); await search().catch(showError);
         if (thenRun) startRun();
@@ -573,6 +705,7 @@
 
   // ---------- init ----------
   async function init() {
+    const wantBoard = new URLSearchParams(location.search).get('view') === 'board';
     renderTheme();
     const hadQuery = restoreFromURL();
     renderLevels();
@@ -589,6 +722,7 @@
     $('loadmore').addEventListener('click', () => { state.offset = state.jobs.length; search(true).catch(showError); });
     $('profile-chip').addEventListener('click', () => openSetup('edit'));
     $('theme').addEventListener('click', cycleTheme);
+    document.querySelectorAll('#views button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
     $('scrim').addEventListener('click', closeDrawer);
 
     $('run').addEventListener('click', () => startRun());
@@ -616,7 +750,9 @@
         const pf = state.profile.prefs;
         pressed('global', !!pf.worldwide_only); state.levels = new Set(pf.seniority || []); renderLevels();
       }
+      $('views').hidden = !state.profile.configured;
       await loadFacets(); await search();
+      if (wantBoard && state.profile.configured) setView('board');
       if (!state.profile.configured) openSetup('first');
       pollRun();
     } catch (e) { showError(e); }
