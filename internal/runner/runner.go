@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,7 +54,7 @@ type totalSetter interface{ SetTotal(n int) }
 // A cancelled ctx stops promptly and returns what was found so far.
 func Run(ctx context.Context, store *storage.Store, opts Options, obs scanner.Observer) (Result, error) {
 	if opts.Concurrency <= 0 {
-		opts.Concurrency = 4
+		opts.Concurrency = 16
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 25 * time.Second
@@ -83,12 +84,27 @@ func Run(ctx context.Context, store *storage.Store, opts Options, obs scanner.Ob
 }
 
 // runWith is Run's testable core.
+// perCompanyTimeout caps how long one company may hold a worker, so a huge or hung board can never
+// stall the whole scan.
+var perCompanyTimeout = 45 * time.Second
+
+// runWith is Run's testable core. Companies and job feeds run at the same time; both count toward
+// the progress total so 100% means everything has finished.
 func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetcher, store feedStore, opts Options, obs scanner.Observer) (Result, error) {
 	if ts, ok := obs.(totalSetter); ok {
-		ts.SetTotal(len(opts.Seeds))
+		ts.SetTotal(len(opts.Seeds) + len(opts.Feeds))
 	}
 
-	var newRoles atomic.Int64
+	var newRoles, feedRoles atomic.Int64
+	var feedWG sync.WaitGroup
+	if len(opts.Feeds) > 0 {
+		feedWG.Add(1)
+		go func() {
+			defer feedWG.Done()
+			feedRoles.Store(int64(runFeeds(ctx, feedFetcher, store, opts.Feeds, obs)))
+		}()
+	}
+
 	var g errgroup.Group
 	g.SetLimit(opts.Concurrency)
 	for _, s := range opts.Seeds {
@@ -97,7 +113,9 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 			if ctx.Err() != nil {
 				return nil
 			}
-			res, err := sc.ProcessSeed(ctx, seed)
+			cctx, cancel := context.WithTimeout(ctx, perCompanyTimeout)
+			defer cancel()
+			res, err := sc.ProcessSeed(cctx, seed)
 			if err != nil {
 				obs.Log("⚠️  %s: %v", seed.Name, err)
 				return nil
@@ -107,62 +125,78 @@ func runWith(ctx context.Context, sc *scanner.Scanner, feedFetcher *crawler.Fetc
 		})
 	}
 	_ = g.Wait()
+	feedWG.Wait()
 
-	result := Result{Companies: len(opts.Seeds), NewRoles: int(newRoles.Load())}
+	return Result{
+		Companies: len(opts.Seeds),
+		NewRoles:  int(newRoles.Load()) + int(feedRoles.Load()),
+		FeedRoles: int(feedRoles.Load()),
+	}, ctx.Err()
+}
 
-	if len(opts.Feeds) > 0 && ctx.Err() == nil {
-		available := feeds.All(feedFetcher)
-		for _, name := range opts.Feeds {
+// runFeeds fetches the job feeds in parallel (each on its own deadline) and returns the new roles.
+func runFeeds(ctx context.Context, fetcher *crawler.Fetcher, store feedStore, names []string, obs scanner.Observer) int {
+	available := feeds.All(fetcher)
+	var total atomic.Int64
+	var g errgroup.Group
+	g.SetLimit(6)
+	for _, name := range names {
+		name := name
+		g.Go(func() error {
+			defer obs.IncCrawled()
 			feed, ok := available[strings.ToLower(strings.TrimSpace(name))]
 			if !ok {
 				obs.Log("⚠️  Unknown feed %q", name)
-				continue
+				return nil
 			}
-			if skip, why := tooSoon(ctx, store, feed); skip {
-				obs.Log("⏭️  %s: %s", feed.Name(), why)
-				if es, ok := obs.(scanner.EventSink); ok {
-					es.Emit(scanner.Event{Kind: "feed", Name: feed.Name(), Source: "feed", Status: scanner.StatusSkipped, Error: "fetched recently (provider rate limit)"})
-				}
-				continue
-			}
-			obs.SetCurrentTarget(feed.Name())
-			emit := func(e scanner.Event) {
-				if es, ok := obs.(scanner.EventSink); ok {
-					e.Kind, e.Name, e.Source = "feed", feed.Name(), "feed"
-					es.Emit(e)
-				}
-			}
-			started := time.Now()
-			emit(scanner.Event{Status: scanner.StatusRunning})
-			metas, err := feed.Fetch(ctx)
-			if err != nil {
-				obs.Log("⚠️  %s: %v", feed.Name(), err)
-				emit(scanner.Event{Status: scanner.StatusFailed, Error: err.Error(), Millis: time.Since(started).Milliseconds()})
-				continue
-			}
-			roleCount := 0
-			added := 0
-			for _, meta := range metas {
-				_, n, saveErr := store.SaveCompanyAndRoles(ctx, meta)
-				if saveErr != nil {
-					obs.Log("⚠️  %s: saving %s: %v", feed.Name(), meta.Name, saveErr)
-					continue
-				}
-				added += n
-				roleCount += len(meta.OpenRoles)
-			}
-			status := scanner.StatusOK
-			if roleCount == 0 {
-				status = scanner.StatusEmpty
-			}
-			emit(scanner.Event{Status: status, Roles: roleCount, New: added, Millis: time.Since(started).Milliseconds()})
-			markFetched(ctx, store, feed)
-			result.FeedRoles += added
-			result.NewRoles += added
-			obs.Log("✅ %s: %d new role(s)", feed.Name(), added)
+			fctx, cancel := context.WithTimeout(ctx, 75*time.Second)
+			defer cancel()
+			total.Add(int64(runFeed(fctx, store, feed, obs)))
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return int(total.Load())
+}
+
+func runFeed(ctx context.Context, store feedStore, feed feeds.Feed, obs scanner.Observer) int {
+	emit := func(e scanner.Event) {
+		if es, ok := obs.(scanner.EventSink); ok {
+			e.Kind, e.Name, e.Source = "feed", feed.Name(), "feed"
+			es.Emit(e)
 		}
 	}
-	return result, ctx.Err()
+	if skip, why := tooSoon(ctx, store, feed); skip {
+		obs.Log("⏭️  %s: %s", feed.Name(), why)
+		emit(scanner.Event{Status: scanner.StatusSkipped, Error: "fetched recently (provider rate limit)"})
+		return 0
+	}
+	started := time.Now()
+	emit(scanner.Event{Status: scanner.StatusRunning})
+	metas, err := feed.Fetch(ctx)
+	if err != nil {
+		obs.Log("⚠️  %s: %v", feed.Name(), err)
+		emit(scanner.Event{Status: scanner.StatusFailed, Error: err.Error(), Millis: time.Since(started).Milliseconds()})
+		return 0
+	}
+	roleCount, added := 0, 0
+	for _, meta := range metas {
+		_, n, saveErr := store.SaveCompanyAndRoles(ctx, meta)
+		if saveErr != nil {
+			obs.Log("⚠️  %s: saving %s: %v", feed.Name(), meta.Name, saveErr)
+			continue
+		}
+		added += n
+		roleCount += len(meta.OpenRoles)
+	}
+	status := scanner.StatusOK
+	if roleCount == 0 {
+		status = scanner.StatusEmpty
+	}
+	emit(scanner.Event{Status: status, Roles: roleCount, New: added, Millis: time.Since(started).Milliseconds()})
+	markFetched(ctx, store, feed)
+	obs.Log("✅ %s: %d new role(s)", feed.Name(), added)
+	return added
 }
 
 // feedStore is the slice of Store that feed ingestion needs.

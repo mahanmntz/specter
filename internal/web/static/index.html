@@ -61,8 +61,9 @@
           <option value="30">Past month</option>
         </select>
         <button id="more-toggle" class="pill" aria-expanded="false">More filters</button>
-        <button id="reset" class="link" hidden>Clear</button>
+        <button id="reset" class="link" hidden>Clear all</button>
       </div>
+      <div id="activefilters" class="activefilters" hidden></div>
       <div id="more" class="more" hidden>
         <div class="row-label">Level</div>
         <div id="levels" class="pills"></div>
@@ -101,8 +102,7 @@
     <footer class="foot">Specter runs on your computer. Your profile and job list never leave it. <span class="kbds"><kbd>/</kbd> search <kbd>j</kbd><kbd>k</kbd> move <kbd>Enter</kbd> details</span></footer>
   </main>
 
-  <div id="scrim" class="scrim" hidden></div>
-  <aside id="drawer" class="drawer" hidden aria-label="Job details"></aside>
+  <dialog id="detail" class="detail" aria-label="Job details"></dialog>
   <dialog id="setup" aria-labelledby="setup-title"></dialog>
   <div id="toast" class="toast" role="status" hidden></div>
 

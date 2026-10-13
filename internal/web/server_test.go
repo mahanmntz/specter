@@ -146,7 +146,7 @@ func TestFilters(t *testing.T) {
 		query string
 		want  string
 	}{
-		{"", "1,3,2"}, // best: worldwide first, then contractor, then rest
+		{"", "1,2,3"}, // best: strongest skill match first, eligibility breaks ties
 		{"global=1", "1"},
 		{"contractor=1", "1,3"},
 		{"q=platform", "2"},
@@ -207,7 +207,7 @@ func TestStatusFlowAndTabs(t *testing.T) {
 		t.Fatal("valid status updates failed")
 	}
 
-	tabs := map[string]string{"": "3,2", "all": "1,3,2", "hidden": "1", "saved": "2", "new": "3"}
+	tabs := map[string]string{"": "2,3", "all": "1,2,3", "hidden": "1", "saved": "2", "new": "3"}
 	for status, want := range tabs {
 		_, ids := jobsFor(t, s, "status="+status)
 		if got := strings.Join(ids, ","); got != want {

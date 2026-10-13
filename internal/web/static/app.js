@@ -5,7 +5,7 @@
   const $ = (id) => document.getElementById(id);
   const state = {
     status: 'active', levels: new Set(), keywords: new Set(), offset: 0, jobs: [], total: 0,
-    facets: null, profile: null, run: { state: 'idle' }, wasRunning: false, pollTimer: null, sel: -1, drawerJob: null,
+    facets: null, profile: null, run: { state: 'idle' }, wasRunning: false, pollTimer: null, sel: -1, openId: null, detailJob: null,
     view: 'list', pipeline: null,
   };
   const STAGES = [['saved', 'Saved'], ['applied', 'Applied'], ['interview', 'Interview'], ['offer', 'Offer'], ['rejected', 'Rejected']];
@@ -108,11 +108,28 @@
   }
   const hasFilters = () => { const p = params(0); p.delete('status'); p.delete('sort'); return [...p.keys()].length > 0; };
 
+  // renderActiveFilters shows every active filter as a removable chip so changes are always visible.
+  function renderActiveFilters() {
+    const chips = [];
+    const add = (label, remove) => chips.push(el('button', { class: 'chip-x', type: 'button', title: 'Remove filter', onclick: () => { remove(); search().catch(showError); } }, label, icon('x')));
+    const q = $('q').value.trim(); if (q) add('“' + q + '”', () => { $('q').value = ''; });
+    if (isOn('global')) add('Worldwide', () => pressed('global', false));
+    if (isOn('contractor')) add('Contractor', () => pressed('contractor', false));
+    if ($('fresh').value !== '0') add($('fresh').selectedOptions[0].textContent, () => { $('fresh').value = '0'; });
+    if ($('min_score').value !== '0') add('Match ' + $('min_score').value + '%+', () => { $('min_score').value = '0'; });
+    const c = $('company').value.trim(); if (c) add('Company: ' + c, () => { $('company').value = ''; });
+    state.levels.forEach((l) => add(shortLevel(l), () => { state.levels.delete(l); renderLevels(); }));
+    state.keywords.forEach((k) => add(k, () => { state.keywords.delete(k); loadFacets(); }));
+    fill($('activefilters'), ...chips);
+    $('activefilters').hidden = !chips.length;
+  }
+
   function persistURL() {
     const p = params(0); if (state.view === 'board') p.set('view', 'board');
     const s = p.toString();
     try { history.replaceState(null, '', s ? '?' + s : location.pathname); } catch { /* ignore */ }
     $('reset').hidden = !hasFilters();
+    renderActiveFilters();
     renderStats();
   }
 
@@ -184,7 +201,9 @@
   // ---------- rendering ----------
   function render() {
     $('list').replaceChildren(...state.jobs.map(row));
-    $('count').textContent = state.total ? plural(state.total, 'job') : '';
+    const f = state.facets; const all = f ? f.total - ((f.statuses && (f.statuses.hidden || 0) + (f.statuses.rejected || 0)) || 0) : 0;
+    $('count').textContent = state.total ? (hasFilters() && state.status === 'active' && all > state.total ? state.total + ' of ' + all + ' jobs' : plural(state.total, 'job')) : '';
+    const lst = $('list'); lst.classList.remove('flash'); void lst.offsetWidth; lst.classList.add('flash');
     $('loadmore').hidden = state.jobs.length >= state.total;
     syncTabs();
 
@@ -248,7 +267,8 @@
           statusButton(job, 'applied', { title: () => 'Mark as applied', icon: () => 'check' }, 'icon applied'),
           statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), icon: (on) => (on ? 'undo-2' : 'eye-off') }, 'icon'),
           el('a', { class: 'apply', href: link, target: '_blank', rel: 'noopener noreferrer', onclick: stop }, 'Apply', icon('arrow-up-right')))));
-    article.addEventListener('click', () => { state.sel = state.jobs.indexOf(job); markSel(); openDrawer(job); });
+    article.addEventListener('click', (e) => { if (e.target.closest('.panel')) return; state.sel = state.jobs.indexOf(job); openDetails(job); });
+    if (state.openId === job.id) { article.classList.add('open'); article.append(detailsPanel(job)); }
     return article;
   }
   const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
@@ -275,9 +295,9 @@
     job.status = next;
     loadFacets().catch(() => {});
     const visible = { active: next !== 'hidden', all: true }[state.status] ?? (next === state.status);
-    if (!visible) { state.jobs = state.jobs.filter((j) => j !== job); state.total--; if (state.drawerJob === job) closeDrawer(); }
+    if (!visible) { state.jobs = state.jobs.filter((j) => j !== job); state.total--; if (state.openId === job.id) state.openId = null; }
     render(); markSel();
-    if (state.drawerJob === job) openDrawer(job);
+    if (state.detailJob === job) fillModal(job);
     if (state.view === 'board') loadBoard().catch(() => {});
   }
 
@@ -291,45 +311,59 @@
     if (!state.jobs.length) return;
     state.sel = Math.max(0, Math.min(state.jobs.length - 1, state.sel + d));
     markSel();
-    if (!$('drawer').hidden) openDrawer(state.jobs[state.sel]);
+    if (state.openId) { state.openId = state.jobs[state.sel].id; render(); markSel(); }
   }
 
-  // ---------- drawer ----------
-  function closeDrawer() { $('drawer').hidden = true; $('scrim').hidden = true; state.drawerJob = null; }
+  // ---------- details: expand inline in the list; centered dialog on the board ----------
+  function closeDetails() { state.openId = null; state.detailJob = null; const dlg = $('detail'); if (dlg.open) dlg.close(); }
 
-  function openDrawer(job) {
-    state.drawerJob = job;
-    const d = $('drawer');
+  function detailsPanel(job) {
     const matched = new Set((job.matches || []).map(lc));
     const extra = (job.keywords || []).filter((k) => !matched.has(lc(k)));
     const link = safeUrl(job.apply_url);
     const site = job.domain && !/\.unknown$/.test(job.domain) ? 'https://' + job.domain : '';
     const fact = (k, v) => (v ? [el('dt', { text: k }), el('dd', {}, typeof v === 'string' ? document.createTextNode(v) : v)] : []);
     const first = job.first_seen && ago(job.first_seen) ? new Date(job.first_seen).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) + ' (' + ago(job.first_seen) + ')' : '';
-
-    d.replaceChildren(
-      el('div', { class: 'd-head' },
-        avatarFor(job),
-        el('div', {}, el('h2', { text: job.title }), el('div', { class: 'meta', text: job.company })),
-        el('button', { class: 'x', 'aria-label': 'Close', onclick: closeDrawer }, icon('x'))),
-      el('div', { class: 'd-scroll' },
+    return el('div', { class: 'panel' },
+      el('div', { class: 'p-left' },
         el('dl', { class: 'facts' },
-          ...fact('Location', job.location), ...fact('Remote', job.policy), ...fact('Level', job.seniority && shortLevel(job.seniority)),
+          ...fact('Location', job.location), ...fact('Who can apply', job.policy), ...fact('Level', job.seniority && shortLevel(job.seniority)),
           ...fact('Pay', job.compensation), ...fact('First seen', first),
           ...fact('Company site', site && el('a', { href: site, target: '_blank', rel: 'noopener noreferrer', class: 'link', text: job.domain }))),
         job.score > 0 ? el('div', { class: 'sec' },
           el('h3', { text: 'Skill match · ' + job.score + '%' }),
           el('div', { class: 'meter' + (job.score >= 80 ? ' hi' : '') }, el('i', { style: 'width:' + job.score + '%' })),
           matched.size ? el('div', { class: 'tags' }, ...(job.matches || []).map((m) => el('span', { class: 'tag hit', text: m }))) : null) : null,
-        trackingSection(job),
         extra.length ? el('div', { class: 'sec' }, el('h3', { text: 'Also mentioned' }), el('div', { class: 'tags' }, ...extra.map((k) => el('span', { class: 'tag', text: k })))) : null),
-      el('div', { class: 'd-foot' },
-        el('a', { class: 'btn go grow', href: link, target: '_blank', rel: 'noopener noreferrer', style: 'display:inline-flex;align-items:center;justify-content:center' }, 'Apply', icon('arrow-up-right')),
-        statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), icon: (on) => (on ? 'undo-2' : 'eye-off'), text: (on) => (on ? 'Unhide' : 'Hide') }, 'btn quiet')));
-    d.hidden = false; $('scrim').hidden = false;
+      el('div', { class: 'p-right' }, trackingSection(job)),
+      el('div', { class: 'p-actions' },
+        el('a', { class: 'btn go', href: link, target: '_blank', rel: 'noopener noreferrer', style: 'display:inline-flex;align-items:center;justify-content:center' }, 'Apply', icon('arrow-up-right')),
+        statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), icon: (on) => (on ? 'undo-2' : 'eye-off'), text: (on) => (on ? 'Unhide' : 'Hide') }, 'btn quiet'),
+        el('button', { class: 'btn quiet', type: 'button', onclick: () => { closeDetails(); render(); markSel(); }, text: 'Close' })));
   }
 
-  // ---------- tracking (drawer) ----------
+  function fillModal(job) {
+    state.detailJob = job;
+    const dlg = $('detail');
+    dlg.replaceChildren(
+      el('div', { class: 'd-head' }, avatarFor(job),
+        el('div', {}, el('h2', { text: job.title }), el('div', { class: 'meta', text: job.company })),
+        el('button', { class: 'x', 'aria-label': 'Close', onclick: closeDetails }, icon('x'))),
+      el('div', { class: 'd-scroll' }, detailsPanel(job)));
+    if (!dlg.open) dlg.showModal();
+  }
+
+  // openDetails toggles the inline panel under a job (list) or opens the dialog (board).
+  function openDetails(job) {
+    if (state.view === 'board') { fillModal(job); return; }
+    state.openId = state.openId === job.id ? null : job.id;
+    render(); markSel();
+    const node = $('list').children[state.jobs.indexOf(job)];
+    if (node && state.openId) node.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+  const refreshDetails = (job) => { if (state.detailJob && $('detail').open) fillModal(job); else { render(); markSel(); } };
+
+  // ---------- tracking ----------
   async function track(job, patch) {
     await api('/api/status', { method: 'POST', body: JSON.stringify({ id: job.id, ...patch }) });
     loadFacets().catch(() => {});
@@ -339,7 +373,7 @@
   function trackingSection(job) {
     const hint = el('div', { class: 'savedhint' });
     const flash = (t) => { hint.textContent = t; setTimeout(() => { hint.textContent = ''; }, 1600); };
-    const refresh = () => { render(); markSel(); openDrawer(job); };
+    const refresh = () => refreshDetails(job);
 
     const pills = el('div', { class: 'stagepills' }, ...STAGES.map(([id, label]) => el('button', {
       class: 'pill' + (job.status === id ? ' on' : ''), type: 'button', text: label,
@@ -418,13 +452,13 @@
         next ? el('button', { class: 'go', type: 'button', title: 'Move to ' + next[1], 'aria-label': 'Move to ' + next[1], onclick: (e) => { e.stopPropagation(); moveTo(job, next[0]); } }, icon('arrow-right')) : null));
     card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', job.id); e.dataTransfer.effectAllowed = 'move'; card.classList.add('dragging'); });
     card.addEventListener('dragend', () => card.classList.remove('dragging'));
-    card.addEventListener('click', () => openDrawer(job));
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter') openDrawer(job); });
+    card.addEventListener('click', () => openDetails(job));
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter') openDetails(job); });
     return card;
   }
 
   async function moveTo(job, stage) {
-    try { await track(job, { status: stage }); await loadBoard(); if (state.drawerJob && state.drawerJob.id === job.id) { const j = state.pipeline.stages.flatMap((x) => x.jobs).find((x) => x.id === job.id); if (j) openDrawer(j); } }
+    try { await track(job, { status: stage }); await loadBoard(); if (state.detailJob && state.detailJob.id === job.id) { const j = state.pipeline.stages.flatMap((x) => x.jobs).find((x) => x.id === job.id); if (j) fillModal(j); } }
     catch (e) { toast(e.message); }
   }
 
@@ -446,12 +480,19 @@
     const f = await api('/api/facets');
     state.facets = f;
     document.title = 'Specter' + (f.total ? ' · ' + f.total : '');
+    setPillCount('global', f.global); setPillCount('contractor', f.contractor);
     $('due-badge').hidden = !f.follow_ups; $('due-badge').textContent = f.follow_ups ? f.follow_ups + ' due' : '';
     $('keywords').replaceChildren(...(f.keywords || []).slice(0, 24).map((k) => el('button', {
       class: 'pill' + (state.keywords.has(k.name) ? ' on' : ''), text: k.name,
       onclick: (e) => { state.keywords.has(k.name) ? state.keywords.delete(k.name) : state.keywords.add(k.name); e.currentTarget.classList.toggle('on'); search().catch(showError); },
     })));
     syncTabs(); renderHero();
+  }
+
+  function setPillCount(id, n) {
+    const b = $(id); let c = b.querySelector('.cnt');
+    if (!c) { c = el('span', { class: 'cnt' }); b.append(c); }
+    c.textContent = n ? String(n) : '';
   }
 
   function renderLevels() {
@@ -580,7 +621,7 @@
     const label = preset ? preset.label.toLowerCase() : '';
     $('m-title').textContent = running ? 'Searching for ' + (label ? label + ' ' : '') + 'jobs' : st.state === 'done' ? 'Search complete' : st.state === 'cancelled' ? 'Search cancelled' : 'Search stopped';
     const act = st.active || [];
-    $('m-sub').textContent = running ? (act.length ? 'Checking ' + (act[0].kind === 'feed' ? srcName(act[0].name) : act[0].name) + (act.length > 1 ? ' and ' + (act.length - 1) + ' more' : '') + ' · ' + srcName(act[0].source) : (total && done >= total ? 'Finishing up job feeds…' : 'Getting ready…'))
+    $('m-sub').textContent = running ? (act.length ? 'Checking ' + (act[0].kind === 'feed' ? srcName(act[0].name) : act[0].name) + (act.length > 1 ? ' and ' + (act.length - 1) + ' more' : '') + ' · ' + srcName(act[0].source) : 'Getting ready…')
       : st.state === 'done' ? 'Everything we could reach has been checked.' : st.error || '';
     mEl.classList.toggle('finished', !running);
 
@@ -917,7 +958,8 @@
     $('profile-chip').addEventListener('click', () => openSetup('edit'));
     $('theme').addEventListener('click', cycleTheme);
     document.querySelectorAll('#views button').forEach((b) => b.addEventListener('click', () => setView(b.dataset.view)));
-    $('scrim').addEventListener('click', closeDrawer);
+    $('detail').addEventListener('close', () => { state.detailJob = null; });
+    $('detail').addEventListener('click', (e) => { if (e.target === $('detail')) closeDetails(); });
 
     $('run').addEventListener('click', () => startRun());
     $('run-menu-btn').addEventListener('click', (e) => { e.stopPropagation(); $('run-menu').hidden = !$('run-menu').hidden; });
@@ -933,12 +975,12 @@
     document.addEventListener('keydown', (e) => {
       const tag = document.activeElement && document.activeElement.tagName;
       const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(tag);
-      if (e.key === 'Escape') { $('run-menu').hidden = true; if (!$('drawer').hidden) closeDrawer(); return; }
+      if (e.key === 'Escape') { $('run-menu').hidden = true; if (state.openId) { closeDetails(); render(); markSel(); } return; }
       if (typing || e.metaKey || e.ctrlKey || e.altKey || $('setup').open) return;
       if (e.key === '/') { e.preventDefault(); $('q').focus(); }
       else if (e.key === 'j') moveSel(1);
       else if (e.key === 'k') moveSel(-1);
-      else if (e.key === 'Enter' && state.jobs[state.sel] && tag !== 'A' && tag !== 'BUTTON') openDrawer(state.jobs[state.sel]);
+      else if (e.key === 'Enter' && state.jobs[state.sel] && tag !== 'A' && tag !== 'BUTTON') openDetails(state.jobs[state.sel]);
     });
 
     try {

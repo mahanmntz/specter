@@ -91,7 +91,7 @@ func TestRunProcessesAllSeedsWithBoundedConcurrency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ing.calls.Load() != 12 || o.crawled != 12 || o.total != 12 {
+	if ing.calls.Load() != 12 || o.crawled != 12 || o.total != 12 { // no feeds in this run
 		t.Errorf("calls=%d crawled=%d total=%d", ing.calls.Load(), o.crawled, o.total)
 	}
 	if res.NewRoles != 24 || res.Companies != 12 {
@@ -183,5 +183,28 @@ func TestRateLimitedFeedIsSkippedWhenFetchedRecently(t *testing.T) {
 	// A plain store without settings never blocks.
 	if skip, _ := tooSoon(context.Background(), store{}, f); skip {
 		t.Error("no settings store → never skip")
+	}
+}
+
+func TestFeedsCountTowardProgressAndHungCompaniesAreCapped(t *testing.T) {
+	old := perCompanyTimeout
+	perCompanyTimeout = 60 * time.Millisecond
+	defer func() { perCompanyTimeout = old }()
+
+	ing := &ingester{delay: 5 * time.Second} // would hang for 5s without the cap
+	o := &obs{}
+	start := time.Now()
+	res, err := runWith(context.Background(), newScanner(ing, o, 0), nil, store{}, Options{Seeds: makeSeeds(4), Concurrency: 4, Feeds: []string{"nope", "nada"}}, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("hung companies must be cut off by the per-company cap: %v", time.Since(start))
+	}
+	if o.total != 6 || o.crawled != 6 {
+		t.Errorf("feeds must count toward progress so 100%% means done: total=%d crawled=%d", o.total, o.crawled)
+	}
+	if res.Companies != 4 {
+		t.Errorf("res = %+v", res)
 	}
 }

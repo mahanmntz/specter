@@ -313,17 +313,17 @@ func sortJobs(jobs []Job, by string) {
 		sort.SliceStable(jobs, func(i, k int) bool {
 			return strings.ToLower(jobs[i].Company) < strings.ToLower(jobs[k].Company)
 		})
-	default: // "best": worldwide-friendly first, then skill match, then recency
+	default: // "best": strongest skill match first; eligibility and recency break ties
 		sort.SliceStable(jobs, func(i, k int) bool {
 			a, b := jobs[i], jobs[k]
+			if a.Score != b.Score {
+				return a.Score > b.Score
+			}
 			if a.Global != b.Global {
 				return a.Global
 			}
 			if a.Contractor != b.Contractor {
 				return a.Contractor
-			}
-			if a.Score != b.Score {
-				return a.Score > b.Score
 			}
 			return a.FirstSeen.After(b.FirstSeen)
 		})
