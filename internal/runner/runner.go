@@ -54,7 +54,7 @@ type totalSetter interface{ SetTotal(n int) }
 // A cancelled ctx stops promptly and returns what was found so far.
 func Run(ctx context.Context, store *storage.Store, opts Options, obs scanner.Observer) (Result, error) {
 	if opts.Concurrency <= 0 {
-		opts.Concurrency = 16
+		opts.Concurrency = 8
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 25 * time.Second
@@ -86,7 +86,7 @@ func Run(ctx context.Context, store *storage.Store, opts Options, obs scanner.Ob
 // runWith is Run's testable core.
 // perCompanyTimeout caps how long one company may hold a worker, so a huge or hung board can never
 // stall the whole scan.
-var perCompanyTimeout = 45 * time.Second
+var perCompanyTimeout = 75 * time.Second
 
 // runWith is Run's testable core. Companies and job feeds run at the same time; both count toward
 // the progress total so 100% means everything has finished.
