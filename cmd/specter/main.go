@@ -81,6 +81,8 @@ func main() {
 		runWatch(os.Args[2:])
 	case "feeds":
 		runFeeds(os.Args[2:])
+	case "seeds":
+		runSeeds(os.Args[2:])
 	case "sync":
 		runSync(os.Args[2:])
 	case "apply":
@@ -241,7 +243,11 @@ func runScan(args []string) {
 	var targetSeeds []seeds.SeedTarget
 	if *all {
 		var sErr error
-		targetSeeds, sErr = seeds.LoadSeeds(*seedsPath)
+		if *seedsPath == "" {
+			targetSeeds, sErr = seeds.Effective(ctx, store) // built-in + imported − switched off
+		} else {
+			targetSeeds, sErr = seeds.LoadSeeds(*seedsPath)
+		}
 		if sErr != nil {
 			fmt.Fprintf(os.Stderr, "Failed loading seeds: %v\n", sErr)
 			os.Exit(1)
@@ -609,6 +615,7 @@ func runServe(args []string) {
 
 	webSrv := web.New(store, web.Options{
 		Skills: signals.GetUserSkills(),
+		Seeds:  func() ([]seeds.SeedTarget, error) { return seeds.Effective(context.Background(), store) },
 		GitHub: ghprofile.NewClient(),
 		Run: func(ctx context.Context, opts runner.Options, prog *web.Progress) (runner.Result, error) {
 			return runner.Run(ctx, store, opts, prog)
@@ -1110,6 +1117,7 @@ func printHelp() {
 🛠️ Standard Commands:
   ./specter serve [--addr=127.0.0.1:8080] [--open]   Local web UI to search & filter jobs
   ./specter watch [--every=6h]             Re-scan on an interval and alert on new roles
+  ./specter seeds check|list|import|reset  Manage the company catalog (find dead boards, import more)
   ./specter feeds [--source=remoteok,hn]   Ingest RemoteOK & Hacker News "Who is hiring?"
   ./specter scan [--target=<url>] [--github=<org>] [--force] [--sync-sheets]
   ./specter sync airtable|notion [--global-only] [--fresh-only] [--limit=200]

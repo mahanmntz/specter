@@ -14,15 +14,15 @@ func TestGetEmbeddedSeeds(t *testing.T) {
 		t.Errorf("expected at least 40 embedded seeds, got %d", len(seeds))
 	}
 
-	foundHashi := false
+	foundGitLab := false
 	for _, s := range seeds {
-		if s.Name == "HashiCorp" && s.ATSBoardID == "hashicorp" {
-			foundHashi = true
+		if s.Name == "GitLab" && s.ATSBoardID == "gitlab" {
+			foundGitLab = true
 			break
 		}
 	}
 
-	if !foundHashi {
-		t.Errorf("expected to find HashiCorp in embedded seeds catalog")
+	if !foundGitLab {
+		t.Errorf("expected to find GitLab in embedded seeds catalog")
 	}
 }
