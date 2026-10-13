@@ -2,11 +2,6 @@
   'use strict';
   const PAGE = 40;
   const LEVELS = [['Junior', 'Junior'], ['Mid/Standard', 'Mid'], ['Senior', 'Senior'], ['Staff/Principal', 'Staff+'], ['Lead/Engineering Manager', 'Lead']];
-  const ICONS = {
-    system: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
-    light: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
-    dark: '<svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>',
-  };
   const $ = (id) => document.getElementById(id);
   const state = {
     status: 'active', levels: new Set(), keywords: new Set(), offset: 0, jobs: [], total: 0,
@@ -39,7 +34,15 @@
   };
   // replaceChildren() stringifies null/false, so drop empty slots first.
   const fill = (node, ...kids) => node.replaceChildren(...kids.flat().filter((k) => k !== null && k !== undefined && k !== false));
-  const svg = (markup) => { const s = el('span', { class: 'ico' }); s.innerHTML = markup; return s; };
+  const SVGNS = 'http://www.w3.org/2000/svg';
+  // icon renders a Lucide icon from the embedded sprite (icons.svg).
+  function icon(name, cls = '') {
+    const s = document.createElementNS(SVGNS, 'svg');
+    s.setAttribute('class', 'i' + (cls ? ' ' + cls : '')); s.setAttribute('aria-hidden', 'true');
+    const u = document.createElementNS(SVGNS, 'use'); u.setAttribute('href', 'icons.svg#' + name);
+    s.append(u); return s;
+  }
+  const ROLE_ICONS = { 'software-engineer': 'code-xml', backend: 'server', fullstack: 'layers', frontend: 'palette', devops: 'server-cog', data: 'database', ml: 'brain', mobile: 'smartphone', security: 'shield-check', qa: 'flask-conical', embedded: 'cpu', blockchain: 'blocks', game: 'gamepad-2' };
 
   function ago(iso) {
     const d = new Date(iso); if (isNaN(d) || d.getFullYear() < 2000) return '';
@@ -70,7 +73,7 @@
   const themeNow = () => document.documentElement.getAttribute('data-theme') || 'system';
   function renderTheme() {
     const t = themeNow(); const b = $('theme');
-    b.innerHTML = ICONS[t];
+    b.replaceChildren(icon(t === 'system' ? 'monitor' : t === 'light' ? 'sun' : 'moon'));
     b.title = 'Theme: ' + t + ' (click to change)';
     b.setAttribute('aria-label', 'Theme: ' + t);
   }
@@ -167,12 +170,12 @@
     const f = state.facets; if (!f || $('hero').hidden) return;
     const st = f.statuses || {};
     const visible = f.total - (st.hidden || 0);
-    const card = (num, label, on, onclick) => el('button', { class: 'stat' + (on ? ' on' : ''), onclick }, el('b', { text: String(num) }), el('span', { text: label }));
+    const card = (num, label, on, onclick, ic) => el('button', { class: 'stat' + (on ? ' on' : ''), onclick }, el('b', { text: String(num) }), el('span', {}, ic ? icon(ic) : null, label));
     $('stats').replaceChildren(
       card(visible, 'Matching roles', false, resetFilters),
-      card(f.global, '🌍 Worldwide', isOn('global') && state.status === 'active', () => { pressed('global', !isOn('global')); search().catch(showError); }),
+      card(f.global, 'Worldwide', isOn('global') && state.status === 'active', () => { pressed('global', !isOn('global')); search().catch(showError); }, 'globe'),
       card(f.new_week || 0, 'New this week', $('fresh').value === '7', () => { $('fresh').value = $('fresh').value === '7' ? '0' : '7'; search().catch(showError); }),
-      card(st.saved || 0, '★ Saved', state.status === 'saved', () => { state.status = state.status === 'saved' ? 'active' : 'saved'; syncTabs(); search().catch(showError); }));
+      card(st.saved || 0, 'Saved', state.status === 'saved', () => { state.status = state.status === 'saved' ? 'active' : 'saved'; syncTabs(); search().catch(showError); }, 'star'));
   }
 
   // ---------- rendering ----------
@@ -198,13 +201,14 @@
     return el('div', { class: 'avatar' + (extra ? ' ' + extra : ''), style: '--h:' + hue(job.company || '?'), text: (job.company || '?').trim().charAt(0).toUpperCase() });
   }
 
+  // statusButton builds a toggle for a tracking status. labels: { title(on), icon(on) -> name, text?(on) }.
   function statusButton(job, status, labels, cls, after) {
     const on = job.status === status;
+    const kids = [labels.icon ? icon(labels.icon(on)) : null, labels.text ? labels.text(on) : null];
     return el('button', {
       class: cls + (on ? ' on' : ''), title: labels.title(on), 'aria-label': labels.title(on), type: 'button',
       onclick: (e) => { e.stopPropagation(); setStatus(job, status).then(after).catch((err) => toast(err.message)); },
-      text: labels.text(on),
-    });
+    }, ...kids);
   }
 
   function row(job, idx) {
@@ -237,10 +241,10 @@
       el('div', { class: 'side' },
         job.score > 0 ? el('span', { class: 'score' + (job.score >= 80 ? ' hi' : ''), title: (job.matches || []).join(', '), text: job.score + '% match' }) : null,
         el('div', { class: 'acts' },
-          statusButton(job, 'saved', { title: () => 'Save', text: (on) => (on ? '★' : '☆') }, 'icon'),
-          statusButton(job, 'applied', { title: () => 'Mark as applied', text: () => '✓' }, 'icon applied'),
-          statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), text: (on) => (on ? '↺' : '✕') }, 'icon'),
-          el('a', { class: 'apply', href: link, target: '_blank', rel: 'noopener noreferrer', onclick: stop, text: 'Apply ↗' }))));
+          statusButton(job, 'saved', { title: (on) => (on ? 'Saved (click to remove)' : 'Save'), icon: (on) => (on ? 'star-filled' : 'star') }, 'icon'),
+          statusButton(job, 'applied', { title: () => 'Mark as applied', icon: () => 'check' }, 'icon applied'),
+          statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), icon: (on) => (on ? 'undo-2' : 'eye-off') }, 'icon'),
+          el('a', { class: 'apply', href: link, target: '_blank', rel: 'noopener noreferrer', onclick: stop }, 'Apply', icon('arrow-up-right')))));
     article.addEventListener('click', () => { state.sel = state.jobs.indexOf(job); markSel(); openDrawer(job); });
     return article;
   }
@@ -254,6 +258,7 @@
     if (days < -30) return 'Follow-up overdue';
     if (days < 0) return 'Follow-up ' + Math.abs(days) + 'd overdue';
     if (days === 0) return 'Follow up today';
+    if (days > 60) return 'Follow up ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     return 'Follow up in ' + days + 'd';
   }
   const dateInput = (iso) => { const d = new Date(iso); return isNaN(d) || d.getFullYear() < 2000 ? '' : d.toISOString().slice(0, 10); };
@@ -303,7 +308,7 @@
       el('div', { class: 'd-head' },
         avatarFor(job),
         el('div', {}, el('h2', { text: job.title }), el('div', { class: 'meta', text: job.company })),
-        el('button', { class: 'x', 'aria-label': 'Close', onclick: closeDrawer, text: '✕' })),
+        el('button', { class: 'x', 'aria-label': 'Close', onclick: closeDrawer }, icon('x'))),
       el('div', { class: 'd-scroll' },
         el('dl', { class: 'facts' },
           ...fact('Location', job.location), ...fact('Remote', job.policy), ...fact('Level', job.seniority && shortLevel(job.seniority)),
@@ -316,8 +321,8 @@
         trackingSection(job),
         extra.length ? el('div', { class: 'sec' }, el('h3', { text: 'Also mentioned' }), el('div', { class: 'tags' }, ...extra.map((k) => el('span', { class: 'tag', text: k })))) : null),
       el('div', { class: 'd-foot' },
-        el('a', { class: 'btn go grow', href: link, target: '_blank', rel: 'noopener noreferrer', style: 'display:grid;place-items:center', text: 'Apply ↗' }),
-        statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), text: (on) => (on ? 'Unhide' : 'Hide') }, 'btn quiet')));
+        el('a', { class: 'btn go grow', href: link, target: '_blank', rel: 'noopener noreferrer', style: 'display:inline-flex;align-items:center;justify-content:center' }, 'Apply', icon('arrow-up-right')),
+        statusButton(job, 'hidden', { title: (on) => (on ? 'Unhide' : 'Hide'), icon: (on) => (on ? 'undo-2' : 'eye-off'), text: (on) => (on ? 'Unhide' : 'Hide') }, 'btn quiet')));
     d.hidden = false; $('scrim').hidden = false;
   }
 
@@ -348,7 +353,7 @@
       },
     })));
 
-    const note = el('textarea', { class: 'note', placeholder: 'Notes: recruiter, salary talk, interview prep…', maxlength: '4000', 'aria-label': 'Notes' });
+    const note = el('textarea', { class: 'notes-area', placeholder: 'Notes: recruiter, salary talk, interview prep…', maxlength: '4000', 'aria-label': 'Notes' });
     note.value = job.note || '';
     note.addEventListener('blur', async () => {
       if (note.value === (job.note || '')) return;
@@ -407,7 +412,7 @@
         job.closed ? el('span', { class: 'tag closed', text: 'Closed' }) : null,
         job.applied_at && ago(job.applied_at) ? el('span', { class: 'tag', text: 'Applied ' + ago(job.applied_at) }) : null,
         f ? el('span', { class: 'tag' + (due ? ' due' : ''), text: f }) : null,
-        next ? el('button', { class: 'go', type: 'button', title: 'Move to ' + next[1], 'aria-label': 'Move to ' + next[1], text: '→', onclick: (e) => { e.stopPropagation(); moveTo(job, next[0]); } }) : null));
+        next ? el('button', { class: 'go', type: 'button', title: 'Move to ' + next[1], 'aria-label': 'Move to ' + next[1], onclick: (e) => { e.stopPropagation(); moveTo(job, next[0]); } }, icon('arrow-right')) : null));
     card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', job.id); e.dataTransfer.effectAllowed = 'move'; card.classList.add('dragging'); });
     card.addEventListener('dragend', () => card.classList.remove('dragging'));
     card.addEventListener('click', () => openDrawer(job));
@@ -569,7 +574,7 @@
           err ? el('div', { class: 'err', role: 'alert', text: err }) : null,
           el('label', { class: 'field' }, el('span', { text: 'Your name' }), name),
           pr.can_import ? el('label', { class: 'field' }, el('span', { text: 'GitHub username' }), el('div', { class: 'prefixed' }, el('em', { text: 'github.com/' }), gh)) : null,
-          pr.can_import ? el('div', { class: 'note' }, el('span', { text: '🔒' }), el('span', { text: 'We read your public repositories (languages, topics) to suggest your skills and role. It happens on your computer; nothing is stored anywhere else.' })) : null),
+          pr.can_import ? el('div', { class: 'note' }, icon('lock'), el('span', { text: 'We read your public repositories (languages, topics) to suggest your skills and role. It happens on your computer; nothing is stored anywhere else.' })) : null),
         el('div', { class: 'w-foot' },
           el('span', { class: 'grow' }),
           el('button', { class: 'btn quiet', type: 'button', onclick: () => { draft.name = name.value.trim(); step = 'profile'; err = ''; draw(); }, text: pr.can_import ? 'Skip, I’ll choose myself' : 'Continue' }),
@@ -617,7 +622,7 @@
         return el('button', {
           class: 'role' + (id === draft.role ? ' on' : ''), type: 'button',
           onclick: () => { draft.role = id; if (!skillsTouched) draft.skills = p.skills.slice(); drawRoles(); drawSkills(); },
-        }, detected && id === detected.role ? el('span', { class: 'best', text: 'Best match' }) : null, el('b', { text: p.emoji + '  ' + p.label }), el('span', { text: p.blurb }));
+        }, detected && id === detected.role ? el('span', { class: 'best', text: 'Best match' }) : null, el('b', {}, icon(ROLE_ICONS[id] || 'code-xml'), p.label), el('span', { text: p.blurb }));
       }));
 
       const drawSkills = () => {

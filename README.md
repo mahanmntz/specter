@@ -284,8 +284,13 @@ Specter then searches its company catalog plus RemoteOK and Hacker News in the b
 |---|---|
 | ![Light theme](docs/ui.png) | ![Dark theme](docs/ui-dark.png) |
 
+**Track your applications** on a board (Saved → Applied → Interview → Offer / Rejected): drag cards between columns, jot notes, and set follow-up reminders. Applying suggests a follow-up a week later, and overdue ones show up as a badge on the Board tab. Jobs you track stay on the board even after the posting is taken down.
+
+![Application board](docs/board.png)
+
 - **Light & dark themes**, following your system by default; the header button cycles system → light → dark.
 - **Filters:** worldwide remote, contractor-friendly, posted-within, level, tech stack, company, minimum skill match. Filters live in the URL, so searches can be bookmarked.
+- **Source transparency:** each job says who can apply (🟢 Worldwide, 🟡 regional, 📍 tied to a place, ⚪ not stated) and which feed it came from.
 - **Job details:** click a job for a side panel showing which of *your* skills match and what else the posting mentions.
 - **Triage:** Save, mark Applied, or Hide jobs (kept only in your local database), then click **Apply** to open the job's own application page.
 - **Keyboard:** `/` search, `j`/`k` move, `Enter` details, `Esc` close.
@@ -344,6 +349,19 @@ specter serve --open
 docker build -t specter .
 docker run --rm -p 127.0.0.1:8080:8080 -v "$PWD/data:/data" specter serve --addr 0.0.0.0:8080 --allow-remote --db /data/specter.db
 ```
+
+## Company catalog
+
+Specter scans a built-in list of companies plus anything you add. Job boards come and go, so keep it healthy:
+
+```bash
+./specter seeds check --repair     # find dead boards (404) and look for each company's new board
+./specter seeds import remoteintech --discover   # add remote-friendly companies (see below)
+./specter seeds list               # what will be scanned
+./specter seeds reset              # back to the built-in list
+```
+
+`import remoteintech` downloads the community directory [remoteintech/remote-jobs](https://github.com/remoteintech/remote-jobs) (ISC licensed) to **your machine** (it is not bundled with Specter), keeps companies whose careers page is a supported job board, and with `--discover` also probes Greenhouse/Lever/Ashby for the rest. Only boards that really exist are added, and they are stored in your own database, so the web UI scans them too. `--discover` makes a few thousand polite requests and takes about 15 minutes; it is a one-time job.
 
 ## Alerts & Scheduled Runs
 
