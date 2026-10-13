@@ -31,11 +31,16 @@ type RemotePolicyResult struct {
 	DirectApplyURL       string     `json:"direct_apply_url"`
 	PolicyName           string     `json:"policy_name"`
 	SummaryNotes         string     `json:"summary_notes"`
+	Scope                Scope      `json:"scope"`
 }
 
 var (
 	// Restrictive patterns that require domestic tax status or local citizenship
 	restrictivePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\b(authori[sz]ed|eligible|legally entitled|legal right)\s+to\s+work\s+in\s+(the\s+)?(us|u\.s\.|usa|united\s+states)\b`),
+		regexp.MustCompile(`(?i)\b(us|u\.s\.)\s+work\s+authori[sz]ation\b`),
+		regexp.MustCompile(`(?i)\bmust\s+(be\s+)?(located|based|reside|living|resident)\b[^.\n]{0,40}\b(united\s+states|usa|u\.s\.|canada|united\s+kingdom)\b`),
+		regexp.MustCompile(`(?i)\b(itar|export[- ]control(led)?|us\s+persons?)\b`),
 		regexp.MustCompile(`(?i)\b(us|u\.s\.|united states)\s+(only|citizenship|citizen|residents|based)\b`),
 		regexp.MustCompile(`(?i)\b(must\s+be\s+located\s+in\s+the\s+united\s+states)\b`),
 		regexp.MustCompile(`(?i)\b(north\s+america\s+only|us\s+or\s+canada\s+only)\b`),
@@ -45,128 +50,132 @@ var (
 		regexp.MustCompile(`(?i)\b(authorized\s+to\s+work\s+in\s+the\s+us\s+without\s+sponsorship)\b`),
 		regexp.MustCompile(`(?i)\b(no\s+contractors|not\s+open\s+to\s+contractors)\b`),
 	}
-
-	// Global / contractor / B2B friendly indicators
-	globalFriendlyPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\b(anywhere|worldwide|work\s+from\s+anywhere|global\s+remote|fully\s+distributed)\b`),
-		regexp.MustCompile(`(?i)\b(contractor|independent\s+contractor|b2b|contract-to-hire|freelance)\b`),
-		regexp.MustCompile(`(?i)\b(deel|remote\.com|oysterhr|invoice|crypto|usdt|usdc)\b`),
-		regexp.MustCompile(`(?i)\b(async-first|asynchronous|all\s+timezones|timezone\s+agnostic)\b`),
-		regexp.MustCompile(`(?i)\b(open\s+source\s+first|global\s+team|hiring\s+globally)\b`),
-	}
-
-	// Regional / timezone friendly (EMEA, UTC±4)
-	regionalPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)\b(emea|europe|latam|apac|utc[+-][0-9]|cest|gmt)\b`),
-		regexp.MustCompile(`(?i)\b(4\s+hours\s+overlap|overlap\s+with\s+utc)\b`),
-	}
 )
 
-// ClassifyRemotePolicy evaluates a job posting's location, description, and apply URL to assess remote friendliness.
+// Scope describes who can actually apply to a remote posting.
+type Scope string
+
+const (
+	ScopeWorldwide Scope = "worldwide"  // anyone, anywhere
+	ScopeRegional  Scope = "regional"   // a broad region or timezone band (EMEA, Europe, UTC±3)
+	ScopeLocal     Scope = "local"      // tied to named places (Poland, "US or Canada", a city)
+	ScopeRestrict  Scope = "restricted" // explicit legal restriction (US-only, clearance, W-2)
+	ScopeUnknown   Scope = "unknown"    // says "remote" but never says where
+	ScopeOnsite    Scope = "onsite"     // an office location
+)
+
+// TierUnknown: the posting is remote but does not say who may apply.
+const TierUnknown RemoteTier = 4
+
+var (
+	// Words that carry no geographic meaning inside a location string.
+	locationNoise = regexp.MustCompile(`(?i)\b(remote(ly)?|hybrid|on-?site|fully|work from home|wfh|home[- ]based|distributed|flexible|virtual|based|within|in|or|and|the|only|from|candidates?|located|anywhere|worldwide|global|globally)\b`)
+	nonLetters    = regexp.MustCompile(`[^\p{L}]+`)
+
+	worldwideLocation = regexp.MustCompile(`(?i)\b(anywhere|worldwide|world[- ]wide|global(ly)?|earth|any country)\b`)
+	worldwideText     = regexp.MustCompile(`(?i)(work from anywhere|anywhere in the world|from anywhere|hiring (globally|worldwide|across the world)|worldwide|global remote|fully distributed.{0,40}(all|any) time ?zones?|any time ?zone)`)
+	regionalLocation  = regexp.MustCompile(`(?i)\b(emea|europe|european|eu|eea|apac|asia|asean|latam|latin america|south america|middle east|mena|africa|americas|cet|cest|gmt|utc\s?[+-]\s?\d+|(european|eastern|central|pacific|mountain) time)\b`)
+	contractorText    = regexp.MustCompile(`(?i)\b(independent contractors?|contractors?|b2b|freelanc\w*|deel|remote\.com|oyster(hr)?|invoice|1099|c2c)\b`)
+	noContractorText  = regexp.MustCompile(`(?i)(no contractors|not open to contractors|employees only|w-?2 only|no c2c|no corp-to-corp|no third[- ]party)`)
+)
+
+// placeOf returns the geographic words left in a location once remote-work wording is removed
+// ("Remote - Canada" → "Canada"; "Remote" → "").
+func placeOf(location string) string {
+	cleaned := locationNoise.ReplaceAllString(location, " ")
+	cleaned = nonLetters.ReplaceAllString(cleaned, " ")
+	return strings.Join(strings.Fields(cleaned), " ")
+}
+
+func result(tier RemoteTier, scope Scope, badge, name, notes string, global, contractor, sanctionSafe bool, apply string) RemotePolicyResult {
+	return RemotePolicyResult{
+		Tier: tier, Badge: badge, IsGlobalRemote: global, IsContractorFriendly: contractor,
+		SanctionSafe: sanctionSafe, DirectApplyURL: apply, PolicyName: name, SummaryNotes: notes, Scope: scope,
+	}
+}
+
+// ClassifyRemotePolicy decides who can apply to a posting from its location text, then its description.
+// It prefers "unknown" over guessing "worldwide": a posting is only worldwide when it says so.
 func ClassifyRemotePolicy(location, description, postingURL string) RemotePolicyResult {
+	apply := GenerateDirectApplyURL(postingURL)
 	locLower := strings.ToLower(location)
-	combined := strings.ToLower(location + " " + description)
+	combined := location + " " + description
+	contractor := contractorText.MatchString(combined) && !noContractorText.MatchString(combined)
+	isRemote := strings.Contains(locLower, "remote") || strings.Contains(locLower, "anywhere") || strings.Contains(locLower, "work from home")
+	place := placeOf(location)
 
-	directApply := GenerateDirectApplyURL(postingURL)
-
-	// 1. Direct check on location for immediate Worldwide / Global indicator
-	isWorldwideLoc := strings.Contains(locLower, "anywhere") ||
-		strings.Contains(locLower, "worldwide") ||
-		strings.Contains(locLower, "global") ||
-		strings.Contains(locLower, "remote - global") ||
-		strings.Contains(locLower, "remote (worldwide)") ||
-		strings.Contains(locLower, "remote / anywhere")
-
-	// 2. Check for hard restrictions
+	// 1. Explicit legal restrictions always win.
 	for _, re := range restrictivePatterns {
 		if re.MatchString(combined) {
-			return RemotePolicyResult{
-				Tier:                 TierGeoRestricted,
-				Badge:                "🔴 Geo-Restricted (Domestic / W-2)",
-				IsGlobalRemote:       false,
-				IsContractorFriendly: false,
-				SanctionSafe:         false,
-				DirectApplyURL:       directApply,
-				PolicyName:           "Geo-Restricted",
-				SummaryNotes:         "Requires domestic US/EU legal residency or W2 tax authorization.",
-			}
+			return result(TierGeoRestricted, ScopeRestrict, "🔴 Geo-restricted (domestic / W-2)", "Geo-Restricted",
+				"Requires domestic legal residency, W-2 status or a clearance.", false, false, false, apply)
 		}
 	}
 
-	// 3. Check for Global / Contractor signals
-	globalMatches := 0
-	for _, re := range globalFriendlyPatterns {
-		if re.MatchString(combined) {
-			globalMatches++
+	// 2. The location field is the most reliable statement of who can apply.
+	if worldwideLocation.MatchString(location) && place == "" {
+		return result(TierGlobalRemote, ScopeWorldwide, "🟢 Worldwide", "Worldwide",
+			"The posting lists a worldwide location.", true, contractor, true, apply)
+	}
+	if place != "" && isRemote {
+		if regionalLocation.MatchString(location) {
+			return result(TierTimezoneFlexible, ScopeRegional, "🟡 Remote · "+strings.ToUpper(place), "Regional",
+				"Remote within a broad region or timezone band.", false, contractor, true, apply)
+		}
+		return result(TierGeoRestricted, ScopeLocal, "📍 Remote · "+titleCase(place), "Local",
+			"Remote, but tied to the places listed; check you are eligible.", false, contractor, false, apply)
+	}
+	if place != "" && !isRemote {
+		return result(TierTimezoneFlexible, ScopeOnsite, "📍 "+location, location,
+			fmt.Sprintf("Primary location listed as %s; verify remote contract availability.", location), false, contractor, false, apply)
+	}
+
+	// 3. "Remote" with no place (or no location at all): read the description.
+	if isRemote || strings.TrimSpace(location) == "" {
+		switch {
+		case worldwideText.MatchString(description):
+			return result(TierGlobalRemote, ScopeWorldwide, "🟢 Worldwide", "Worldwide",
+				"The description says the role can be done from anywhere.", true, contractor, true, apply)
+		case regionalLocation.MatchString(description):
+			return result(TierTimezoneFlexible, ScopeRegional, "🟡 Remote · regional", "Regional",
+				"Remote with regional or timezone expectations.", false, contractor, true, apply)
+		case isRemote:
+			return result(TierUnknown, ScopeUnknown, "⚪ Remote · region not stated", "Remote",
+				"Remote, but the posting does not say where candidates may live.", false, contractor, false, apply)
 		}
 	}
 
-	isContractor := strings.Contains(combined, "contractor") ||
-		strings.Contains(combined, "b2b") ||
-		strings.Contains(combined, "deel") ||
-		strings.Contains(combined, "remote.com") ||
-		strings.Contains(combined, "independent contractor")
+	return result(TierTimezoneFlexible, ScopeOnsite, "📍 Location not stated", location,
+		"No remote information found.", false, contractor, false, apply)
+}
 
-	// Check if location or description is explicitly regional/timezone-bound (and not worldwide)
-	isRegional := false
-	for _, re := range regionalPatterns {
-		if re.MatchString(locLower) || re.MatchString(combined) {
-			isRegional = true
-			break
+// StructuredPolicy builds a policy from a feed that states eligibility explicitly
+// (for example a `locationRestrictions` list), so no guessing is involved.
+func StructuredPolicy(scope Scope, places []string, contractor bool, postingURL string) RemotePolicyResult {
+	apply := GenerateDirectApplyURL(postingURL)
+	list := strings.Join(places, ", ")
+	switch scope {
+	case ScopeWorldwide:
+		return result(TierGlobalRemote, ScopeWorldwide, "🟢 Worldwide", "Worldwide", "The source lists no location restriction.", true, contractor, true, apply)
+	case ScopeRegional:
+		return result(TierTimezoneFlexible, ScopeRegional, "🟡 Remote · "+list, "Regional", "Remote within the listed regions.", false, contractor, true, apply)
+	case ScopeLocal, ScopeRestrict:
+		return result(TierGeoRestricted, ScopeLocal, "📍 Remote · "+list, "Local", "Remote, but limited to the listed places.", false, contractor, false, apply)
+	default:
+		return result(TierUnknown, ScopeUnknown, "⚪ Remote · region not stated", "Remote", "The source does not state eligibility.", false, contractor, false, apply)
+	}
+}
+
+func titleCase(s string) string {
+	words := strings.Fields(strings.ToLower(s))
+	for i, w := range words {
+		if len(w) <= 3 && (w == "us" || w == "uk" || w == "usa" || w == "uae") {
+			words[i] = strings.ToUpper(w)
+			continue
 		}
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
 	}
-
-	if !isWorldwideLoc && isRegional {
-		return RemotePolicyResult{
-			Tier:                 TierTimezoneFlexible,
-			Badge:                "🟡 Timezone-Flexible (EMEA/Global)",
-			IsGlobalRemote:       true,
-			IsContractorFriendly: isContractor,
-			SanctionSafe:         true,
-			DirectApplyURL:       directApply,
-			PolicyName:           "Regional / Timezone Flexible",
-			SummaryNotes:         "Remote with timezone overlap expectations (EMEA/UTC friendly).",
-		}
-	}
-
-	if isWorldwideLoc || globalMatches >= 2 || (globalMatches >= 1 && strings.Contains(locLower, "remote")) {
-		return RemotePolicyResult{
-			Tier:                 TierGlobalRemote,
-			Badge:                "🟢 Worldwide / Contractor-Friendly",
-			IsGlobalRemote:       true,
-			IsContractorFriendly: isContractor || true, // Worldwide devtools startups standardly use Deel/Contractor
-			SanctionSafe:         true,
-			DirectApplyURL:       directApply,
-			PolicyName:           "Global Remote (Anywhere)",
-			SummaryNotes:         "Worldwide remote friendly; accessible via B2B/Contractor or Deel.",
-		}
-	}
-
-	// 5. Default generic Remote
-	if strings.Contains(locLower, "remote") {
-		return RemotePolicyResult{
-			Tier:                 TierGlobalRemote,
-			Badge:                "🟢 Remote (No Geo-Block Detected)",
-			IsGlobalRemote:       true,
-			IsContractorFriendly: isContractor,
-			SanctionSafe:         true,
-			DirectApplyURL:       directApply,
-			PolicyName:           "Remote",
-			SummaryNotes:         "Open remote requisition without explicit domestic restrictions.",
-		}
-	}
-
-	// Onsite or location-bound fallback
-	return RemotePolicyResult{
-		Tier:                 TierTimezoneFlexible,
-		Badge:                "🟡 Location Specified",
-		IsGlobalRemote:       false,
-		IsContractorFriendly: isContractor,
-		SanctionSafe:         false,
-		DirectApplyURL:       directApply,
-		PolicyName:           location,
-		SummaryNotes:         fmt.Sprintf("Primary location listed as %s; verify remote contract availability.", location),
-	}
+	return strings.Join(words, " ")
 }
 
 // GenerateDirectApplyURL transforms an ATS job posting link into a direct application deep link.

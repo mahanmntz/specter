@@ -209,6 +209,7 @@
     const hits = new Set((job.matches || []).map(lc));
     const tags = [];
     if (job.global_remote) tags.push(el('span', { class: 'tag good', text: 'Worldwide' }));
+    if (!job.global_remote && job.policy) tags.push(el('span', { class: 'tag', title: 'Who can apply', text: job.policy }));
     if (job.contractor_friendly) tags.push(el('span', { class: 'tag good', text: 'Contractor' }));
     if (isNew) tags.push(el('span', { class: 'tag warn', text: 'New' }));
     if (job.seniority && job.seniority !== 'Mid/Standard') tags.push(el('span', { class: 'tag', text: shortLevel(job.seniority) }));
