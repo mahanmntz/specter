@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"time"
 
+	"github.com/mahanmntz/specter/internal/cvparse"
 	"github.com/mahanmntz/specter/internal/feeds"
 	"github.com/mahanmntz/specter/internal/ghprofile"
 	"github.com/mahanmntz/specter/internal/runner"
@@ -170,14 +172,7 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 		avatar, _ = s.opts.GitHub.AvatarDataURL(ctx, res.AvatarURL) // best effort
 	}
 
-	skills := make([]importSkill, 0, len(res.Skills))
-	for _, sk := range res.Skills {
-		skills = append(skills, importSkill{sk.Name, sk.Score, sk.Repos, sk.LastUsed, sk.FromProfile, sk.Selected})
-	}
-	roles := res.Roles
-	if len(roles) == 0 {
-		roles = []string{res.Role}
-	}
+	skills, roles := importView(res)
 
 	name := res.Name
 	if name == "" {
@@ -187,5 +182,72 @@ func (s *Server) handleGitHubImport(w http.ResponseWriter, r *http.Request) {
 		"login": res.Login, "name": name, "bio": res.Bio, "location": res.Location,
 		"avatar": avatar, "role": res.Role, "roles": roles, "skills": skills,
 		"repos_analyzed": res.ReposAnalyzed, "public_repos": res.PublicRepos, "readme_used": res.ReadmeUsed,
+	})
+}
+
+// importView shapes an analysis result for the UI: skills (strongest first, with the pre-selection
+// the analyzer decided) and the roles ordered best first.
+func importView(res *ghprofile.Result) ([]importSkill, []string) {
+	skills := make([]importSkill, 0, len(res.Skills))
+	for _, sk := range res.Skills {
+		skills = append(skills, importSkill{sk.Name, sk.Score, sk.Repos, sk.LastUsed, sk.FromProfile, sk.Selected})
+	}
+	roles := res.Roles
+	if len(roles) == 0 {
+		roles = []string{res.Role}
+	}
+	return skills, roles
+}
+
+// handleCVImport reads a PDF CV and proposes a name, role and skills. The file is streamed into
+// memory, analysed and discarded: nothing is written to disk and nothing leaves the machine.
+func (s *Server) handleCVImport(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, cvparse.MaxBytes+(256<<10))
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "upload a PDF file"})
+		return
+	}
+	var data []byte
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			break
+		}
+		if part.FormName() != "file" {
+			continue
+		}
+		data, err = io.ReadAll(io.LimitReader(part, cvparse.MaxBytes+1))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read the upload"})
+			return
+		}
+		break
+	}
+	if len(data) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "upload a PDF file"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	text, err := cvparse.Extract(ctx, data)
+	switch {
+	case errors.Is(err, cvparse.ErrTooLarge):
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error()})
+		return
+	case errors.Is(err, cvparse.ErrNotPDF):
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	case err != nil:
+		writeJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		return
+	}
+
+	res := ghprofile.AnalyzeText(text)
+	skills, roles := importView(res)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"source": "cv", "login": "", "name": cvparse.GuessName(text), "bio": "", "avatar": "",
+		"role": res.Role, "roles": roles, "skills": skills, "repos_analyzed": 0, "readme_used": false,
 	})
 }

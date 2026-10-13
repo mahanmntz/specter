@@ -75,6 +75,7 @@ func repoWeight(r ghRepo, now time.Time) float64 {
 // profileText is what the user wrote about themselves.
 type profileText struct {
 	skills []string
+	counts map[string]int     // skill -> how often it is mentioned
 	hints  map[string]float64 // role id -> self-declared strength
 }
 
@@ -112,7 +113,11 @@ func readProfileText(bio, readme string) profileText {
 		kept = append(kept, line)
 	}
 	text := strings.Join(kept, "\n")
-	pt.skills = signals.FindSkills(text)
+	pt.counts = signals.CountSkills(text)
+	for skill := range pt.counts {
+		pt.skills = append(pt.skills, skill)
+	}
+	sort.Strings(pt.skills)
 	for _, h := range roleHints {
 		if h.re.MatchString(text) {
 			pt.hints[h.role] = 3
@@ -355,4 +360,49 @@ func analyze(res *Result, repos []ghRepo, langBytes map[string]map[string]int, b
 	res.ReposAnalyzed = analyzed
 	res.Skills = selectSkills(acc)
 	res.Role, res.Roles, res.RoleScores = rankRoles(acc, pt)
+}
+
+var skillsHeader = regexp.MustCompile(`(?i)^\s*(technical\s+skills|core\s+skills|key\s+skills|skills|technologies|tech\s+stack|expertise|competencies|tools)\s*:?\s*$`)
+
+// skillsSection returns the lines that follow "Skills"-style headings, where people list their tools.
+func skillsSection(text string) string {
+	lines := strings.Split(text, "\n")
+	var out []string
+	for i, l := range lines {
+		if !skillsHeader.MatchString(l) {
+			continue
+		}
+		taken := 0
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" {
+				continue
+			}
+			out = append(out, next)
+			if taken++; taken >= 12 {
+				break
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// AnalyzeText infers skills and role from free text such as a CV. Skills count more the more often
+// they are mentioned and when they are listed under a "Skills" heading; things the person says they
+// are still learning are ignored. There is no recency signal in plain text, so none is used.
+func AnalyzeText(text string) *Result {
+	pt := readProfileText("", text)
+	inSkills := signals.CountSkills(skillsSection(text))
+
+	acc := map[string]*skillAcc{}
+	for skill, n := range pt.counts {
+		w := 2 + 1.5*math.Log1p(float64(n))
+		if inSkills[skill] > 0 {
+			w += 1.5
+		}
+		acc[skill] = &skillAcc{weight: w, repos: n, profile: true}
+	}
+	res := &Result{}
+	res.Skills = selectSkills(acc)
+	res.Role, res.Roles, res.RoleScores = rankRoles(acc, pt)
+	return res
 }

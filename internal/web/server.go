@@ -94,6 +94,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/profile", s.handleGetProfile)
 	mux.HandleFunc("PUT /api/profile", s.handlePutProfile)
 	mux.HandleFunc("POST /api/github/import", s.handleGitHubImport)
+	mux.HandleFunc("POST /api/cv/import", s.handleCVImport)
 	mux.HandleFunc("GET /api/run", s.handleRunStatus)
 	mux.HandleFunc("POST /api/run", s.handleRunStart)
 	mux.HandleFunc("POST /api/run/cancel", s.handleRunCancel)

@@ -18,3 +18,6 @@ Permission to use, copy, modify, and/or distribute this software for any purpose
 ## Data sources (used at run time, not bundled)
 - remoteintech/remote-jobs directory (ISC): downloaded on the user's machine by `specter seeds import remoteintech`.
 - Public job APIs: Remotive (attribution required, rate limited), Jobicy, Himalayas, Arbeitnow, RemoteOK, Hacker News (Algolia). Please follow each provider's terms.
+
+## ledongthuc/pdf (Go library)
+Used to read text from PDF CVs, locally and in memory. BSD 3-Clause License. Copyright (c) 2009 The Go Authors. All rights reserved. https://github.com/ledongthuc/pdf

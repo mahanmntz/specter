@@ -415,3 +415,58 @@ func TestAnalyzeFetchesLanguagesForStrongestReposAndSurvivesRateLimit(t *testing
 		t.Errorf("rate-limited languages must degrade gracefully: err=%v skills=%v", err, res.Skills)
 	}
 }
+
+func TestAnalyzeTextFromACV(t *testing.T) {
+	cv := `Ada Lovelace
+Senior Backend Engineer
+
+EXPERIENCE
+Built Go microservices on Kubernetes with PostgreSQL and Redis. Led the Go migration.
+Designed gRPC APIs in Go; operated Kafka pipelines. Mentored engineers in Go and Python.
+Wrote Python scripts for Terraform automation.
+
+Skills
+Go, Python, PostgreSQL, Kubernetes, Docker, Redis, Kafka
+
+Currently learning Rust and Swift for fun.
+Let's go for a walk. I enjoy Haskell on weekends.`
+	res := AnalyzeText(cv)
+
+	got := skillMap(res.Skills)
+	for _, want := range []string{"Go", "Python", "PostgreSQL", "Kubernetes"} {
+		if !got[want].Selected {
+			t.Errorf("%s should be pre-selected: %+v", want, got[want])
+		}
+	}
+	if got["Go"].Score <= got["Docker"].Score {
+		t.Errorf("a skill mentioned many times (Go) should outrank one listed once (Docker): %.1f vs %.1f", got["Go"].Score, got["Docker"].Score)
+	}
+	for _, learning := range []string{"Rust", "Swift"} {
+		if _, ok := got[learning]; ok {
+			t.Errorf("%s is something the CV says they are learning", learning)
+		}
+	}
+	if res.Role != "backend" {
+		t.Errorf("'Senior Backend Engineer' + backend skills → backend, got %s (%v)", res.Role, res.Roles)
+	}
+	count := 0
+	for _, s := range res.Skills {
+		if s.Selected {
+			count++
+		}
+	}
+	if count > maxPreselected {
+		t.Errorf("at most %d pre-selected, got %d", maxPreselected, count)
+	}
+}
+
+func TestAnalyzeTextBoostsTheSkillsSection(t *testing.T) {
+	a := AnalyzeText("Worked with Redis once.\n\nSkills\nKafka, Docker")
+	got := skillMap(a.Skills)
+	if got["Kafka"].Score <= got["Redis"].Score {
+		t.Errorf("skills listed under a Skills heading should count more: Kafka %.1f vs Redis %.1f", got["Kafka"].Score, got["Redis"].Score)
+	}
+	if empty := AnalyzeText("nothing technical here at all"); len(empty.Skills) != 0 || empty.Role != "software-engineer" {
+		t.Errorf("no signal → generalist with no skills: %+v", empty)
+	}
+}

@@ -175,54 +175,78 @@ var ambiguousSkills = map[string]bool{
 // neverInFreeText are abbreviations too short or common to trust outside structured fields.
 var neverInFreeText = map[string]bool{"c": true, "sh": true, "ts": true, "js": true, "py": true, "ml": true, "node": true}
 
-// FindSkills returns the canonical catalog skills mentioned in free text (a GitHub bio, README or
-// repository description). Matching is word-boundary aware and conservative about ambiguous words.
-func FindSkills(text string) []string {
+// skillMentions counts how many times each catalog skill appears in free text (a GitHub bio, README,
+// CV or repository description). Matching is word-boundary aware and conservative about ambiguous words.
+func skillMentions(text string) map[string]int {
 	skillIndexOnce.Do(buildSkillIndex)
-	var found []string
-	seen := map[string]bool{}
+	counts := map[string]int{}
 	for term, canon := range skillIndex {
-		if len(term) < 2 || seen[canon] || neverInFreeText[term] {
+		if len(term) < 2 || neverInFreeText[term] {
 			continue
 		}
+		n := 0
 		if ambiguousSkills[term] {
-			if !containsCapitalised(text, term) {
-				continue
-			}
-		} else if !containsTerm(text, term) {
-			continue
+			n = countCapitalised(text, term)
+		} else {
+			n = countTerm(text, term)
 		}
-		seen[canon] = true
-		found = append(found, canon)
+		if n > counts[canon] {
+			counts[canon] = n // aliases of one skill are alternative spellings, not extra mentions
+		}
+	}
+	for k, v := range counts {
+		if v == 0 {
+			delete(counts, k)
+		}
+	}
+	return counts
+}
+
+// FindSkills returns the canonical catalog skills mentioned in free text.
+func FindSkills(text string) []string {
+	var found []string
+	for skill := range skillMentions(text) {
+		found = append(found, skill)
 	}
 	return found
 }
 
+// CountSkills returns how many times each catalog skill is mentioned in free text.
+func CountSkills(text string) map[string]int { return skillMentions(text) }
+
 var capRegexes sync.Map // term -> *regexp.Regexp
 
-// containsCapitalised matches term only when its first letter is upper case in the text.
-func containsCapitalised(text, term string) bool {
+func capRegex(term string) *regexp.Regexp {
 	v, ok := capRegexes.Load(term)
 	if !ok {
 		cap := strings.ToUpper(term[:1]) + term[1:]
 		re := regexp.MustCompile(`(^|[^A-Za-z0-9])` + regexp.QuoteMeta(cap) + `($|[^A-Za-z0-9])`)
 		v, _ = capRegexes.LoadOrStore(term, re)
 	}
-	return v.(*regexp.Regexp).MatchString(text)
+	return v.(*regexp.Regexp)
 }
+
+// containsCapitalised matches term only when its first letter is upper case in the text.
+func containsCapitalised(text, term string) bool { return capRegex(term).MatchString(text) }
+
+func countCapitalised(text, term string) int { return len(capRegex(term).FindAllStringIndex(text, -1)) }
 
 var termRegexes sync.Map // term -> *regexp.Regexp
 
 // containsTerm reports whether text contains term delimited by non-alphanumeric characters,
 // so "java" does not match "javascript" and "c" does not match "cache".
-func containsTerm(text, term string) bool {
+func containsTerm(text, term string) bool { return termRegex(term).MatchString(text) }
+
+func countTerm(text, term string) int { return len(termRegex(term).FindAllStringIndex(text, -1)) }
+
+func termRegex(term string) *regexp.Regexp {
 	term = strings.ToLower(term)
 	v, ok := termRegexes.Load(term)
 	if !ok {
 		re := regexp.MustCompile(`(?i)(^|[^a-z0-9])` + regexp.QuoteMeta(term) + `($|[^a-z0-9])`)
 		v, _ = termRegexes.LoadOrStore(term, re)
 	}
-	return v.(*regexp.Regexp).MatchString(text)
+	return v.(*regexp.Regexp)
 }
 
 // roleSignatures maps each preset to the catalog skills that characterize it.
